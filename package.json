@@ -1,0 +1,37 @@
+{
+  "name": "auracle",
+  "version": "1.0.0",
+  "main": "app/main.js",
+  "scripts": {
+    "start": "npm run build && electron .",
+    "dev": "concurrently \"webpack --watch\" \"wait-on dist/bundle.js && electron .\"",
+    "build": "webpack",
+    "package": "electron-builder"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/material": "^7.2.0",
+    "electron": "^37.2.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.28.0",
+    "@babel/core": "^7.28.0",
+    "@babel/preset-env": "^7.28.0",
+    "@babel/preset-react": "^7.27.1",
+    "babel-loader": "^10.0.0",
+    "concurrently": "^9.2.0",
+    "cross-env": "^7.0.3",
+    "electron-builder": "^26.0.12",
+    "html-webpack-plugin": "^5.6.3",
+    "wait-on": "^8.0.3",
+    "webpack": "^5.99.9",
+    "webpack-cli": "^6.0.1"
+  }
+}

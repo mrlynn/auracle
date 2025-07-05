@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build outputs
+dist/
+build/
+
+# Environment variables and secrets
+.env
+.env.local
+.env.production
+
+# User data and configs (contains API keys)
+data/
+app.log
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Whisper.cpp (external dependency - excluded entirely)
+whisper.cpp/
+
+# User-specific directories that may contain sensitive data
+/Users/*/
+/.research-companion/
+
+# API keys and configuration files with secrets
+config.json
+*.key
+*.pem

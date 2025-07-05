@@ -46,3 +46,4 @@ whisper.cpp/
 config.json
 *.key
 *.pem
+codebase.md

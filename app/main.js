@@ -127,20 +127,36 @@ ipcMain.on('start-transcription', (event) => {
   // Clear processor
   processor.clear();
   
-  whisperProc = stt.startTranscription((line) => {
-    // Send to UI
-    mainWindow.webContents.send('transcript-update', line);
-    
-    // Add to session
-    if (currentSession) {
-      currentSession.transcript.push({
-        text: line,
-        timestamp: new Date().toISOString()
-      });
+  whisperProc = stt.startTranscription((data) => {
+    // Handle new structured transcript data
+    if (typeof data === 'string') {
+      // Legacy format for backward compatibility
+      mainWindow.webContents.send('transcript-update', data);
+      if (currentSession) {
+        currentSession.transcript.push({
+          text: data,
+          timestamp: new Date().toISOString()
+        });
+      }
+      processor.addTranscript(data);
+    } else if (data.type === 'final') {
+      // Final committed text
+      mainWindow.webContents.send('transcript-update', { type: 'final', text: data.text });
+      if (currentSession) {
+        currentSession.transcript.push({
+          text: data.text,
+          timestamp: new Date().toISOString(),
+          type: 'final'
+        });
+      }
+      processor.addTranscript(data.text);
+    } else if (data.type === 'interim') {
+      // Interim text (don't save to session, just display)
+      mainWindow.webContents.send('transcript-update', { type: 'interim', text: data.text });
+    } else if (data.type === 'error' || data.type === 'system') {
+      // System messages
+      mainWindow.webContents.send('transcript-update', { type: data.type, text: data.text });
     }
-    
-    // Process through pipeline
-    processor.addTranscript(line);
   });
 });
 

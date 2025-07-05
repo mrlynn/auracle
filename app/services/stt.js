@@ -47,6 +47,69 @@ function cleanTranscriptLine(line) {
   return cleaned.length > 3 ? cleaned : null;
 }
 
+// Calculate similarity between two strings using word overlap
+function calculateSimilarity(str1, str2) {
+  if (!str1 || !str2) return 0;
+  
+  const words1 = str1.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  const words2 = str2.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  
+  if (words1.length === 0 && words2.length === 0) return 1;
+  if (words1.length === 0 || words2.length === 0) return 0;
+  
+  const set1 = new Set(words1);
+  const set2 = new Set(words2);
+  const intersection = new Set([...set1].filter(x => set2.has(x)));
+  
+  return intersection.size / Math.max(set1.size, set2.size);
+}
+
+// Extract new content from incremental transcription
+function extractNewContent(previousContent, newContent) {
+  if (!previousContent) return newContent;
+  if (!newContent) return '';
+  
+  const prevWords = previousContent.toLowerCase().split(/\s+/);
+  const newWords = newContent.toLowerCase().split(/\s+/);
+  const originalNewWords = newContent.split(/\s+/);
+  
+  // Find the longest common suffix in previous content
+  let matchLength = 0;
+  for (let i = 1; i <= Math.min(prevWords.length, newWords.length); i++) {
+    const prevSuffix = prevWords.slice(-i);
+    const newPrefix = newWords.slice(0, i);
+    
+    if (JSON.stringify(prevSuffix) === JSON.stringify(newPrefix)) {
+      matchLength = i;
+    }
+  }
+  
+  // If we found a significant overlap, extract only the new part
+  if (matchLength > 0) {
+    const newPart = originalNewWords.slice(matchLength).join(' ').trim();
+    return newPart;
+  }
+  
+  // If no overlap or very little overlap, check if new content is mostly contained in previous
+  const similarity = calculateSimilarity(previousContent, newContent);
+  if (similarity > 0.7) {
+    // Find the difference by looking for new words at the end
+    const prevWordsSet = new Set(prevWords);
+    const uniqueNewWords = originalNewWords.filter((word, index) => {
+      const lowerWord = word.toLowerCase();
+      return !prevWordsSet.has(lowerWord) || index >= newWords.length - 3; // Keep last few words
+    });
+    
+    if (uniqueNewWords.length > 0) {
+      return uniqueNewWords.join(' ').trim();
+    }
+    
+    return ''; // No new content
+  }
+  
+  return newContent; // Significantly different, return as is
+}
+
 // Path to whisper.cpp binary and model
 const WHISPER_BIN = path.join(__dirname, '../../whisper.cpp/build/bin/whisper-stream');
 const MODEL_PATH = path.join(__dirname, '../../whisper.cpp/models/ggml-base.en.bin');
@@ -67,45 +130,121 @@ function startTranscription(onTranscript) {
     return null;
   }
   
-  // Track recent lines to prevent duplicates
-  const recentLines = new Set();
-  const maxRecentLines = 10;
+  // Advanced transcription state management
+  let transcriptBuffer = '';
+  let lastCommittedText = '';
+  let pendingText = '';
+  const COMMIT_DELAY = 2000; // 2 seconds before committing interim text
+  const MIN_SENTENCE_LENGTH = 10;
+  
+  // Timer for committing pending text
+  let commitTimer = null;
+  
+  const commitPendingText = () => {
+    if (pendingText && pendingText.length > MIN_SENTENCE_LENGTH) {
+      const finalText = improveSentenceStructure(pendingText);
+      onTranscript({ type: 'final', text: finalText });
+      lastCommittedText += (lastCommittedText ? ' ' : '') + finalText;
+      pendingText = '';
+    }
+  };
+  
   const args = [
     '-m', MODEL_PATH,
     '-t', '4',  // 4 threads
-    '--step', '1000',  // Process every 1000ms (less frequent)
-    '--length', '8000',  // Keep 8 seconds of audio (more context)
-    '--keep', '500',   // Keep 500ms from previous step
-    '--vad-thold', '0.6'  // Voice activity detection threshold (higher = less sensitive)
+    '--step', '800',   // Slightly faster updates
+    '--length', '6000', // Reduced context for less overlap
+    '--keep', '300',    // Reduced overlap significantly
+    '--vad-thold', '0.6'
   ];
+  
   const proc = spawn(WHISPER_BIN, args);
   proc.stdout.on('data', (data) => {
     const lines = data.toString().split('\n');
     lines.forEach(line => {
       const cleanedLine = cleanTranscriptLine(line.trim());
-      if (cleanedLine && !recentLines.has(cleanedLine)) {
-        // Add to recent lines and limit size
-        recentLines.add(cleanedLine);
-        if (recentLines.size > maxRecentLines) {
-          const firstItem = recentLines.values().next().value;
-          recentLines.delete(firstItem);
+      if (cleanedLine) {
+        // Extract only new content from the full whisper output
+        const newContent = extractNewContent(transcriptBuffer, cleanedLine);
+        
+        if (newContent && newContent.length > 0) {
+          transcriptBuffer = cleanedLine;
+          
+          // Check if this looks like a sentence completion
+          const hasEndPunctuation = /[.!?]\s*$/.test(newContent);
+          const isLongEnough = newContent.length > MIN_SENTENCE_LENGTH;
+          
+          if (hasEndPunctuation && isLongEnough) {
+            // Complete sentence - commit immediately
+            const finalText = improveSentenceStructure(pendingText + ' ' + newContent);
+            onTranscript({ type: 'final', text: finalText.trim() });
+            lastCommittedText += (lastCommittedText ? ' ' : '') + finalText.trim();
+            pendingText = '';
+            
+            // Clear any pending commit timer
+            if (commitTimer) {
+              clearTimeout(commitTimer);
+              commitTimer = null;
+            }
+          } else {
+            // Interim content - add to pending
+            pendingText += (pendingText ? ' ' : '') + newContent;
+            
+            // Send interim update
+            onTranscript({ 
+              type: 'interim', 
+              text: improveSentenceStructure(pendingText) 
+            });
+            
+            // Set timer to commit if no updates come
+            if (commitTimer) clearTimeout(commitTimer);
+            commitTimer = setTimeout(commitPendingText, COMMIT_DELAY);
+          }
+          
         }
-        onTranscript(cleanedLine);
       }
     });
   });
+  
   proc.stderr.on('data', (data) => {
     const errorText = data.toString();
-    // Only show important errors, filter out verbose initialization logs
     if (errorText.includes('error:') || errorText.includes('failed') || errorText.includes('cannot')) {
-      onTranscript('[whisper.cpp error] ' + errorText);
+      onTranscript({ type: 'error', text: '[whisper.cpp error] ' + errorText });
     }
-    // Silently ignore verbose initialization messages
   });
+  
   proc.on('close', (code) => {
-    onTranscript(`[whisper.cpp exited with code ${code}]`);
+    // Commit any remaining pending text
+    if (commitTimer) {
+      clearTimeout(commitTimer);
+      commitPendingText();
+    }
+    onTranscript({ type: 'system', text: `[whisper.cpp exited with code ${code}]` });
   });
+  
   return proc;
+}
+
+// Improve sentence structure and capitalization
+function improveSentenceStructure(text) {
+  if (!text) return '';
+  
+  let improved = text.trim();
+  
+  // Capitalize first letter
+  improved = improved.charAt(0).toUpperCase() + improved.slice(1);
+  
+  // Add period if sentence doesn't end with punctuation
+  if (!/[.!?]\s*$/.test(improved)) {
+    improved += '.';
+  }
+  
+  // Fix common capitalization issues
+  improved = improved.replace(/\bi\b/g, 'I');
+  improved = improved.replace(/\b(mr|mrs|dr|prof)\b/gi, (match) => 
+    match.charAt(0).toUpperCase() + match.slice(1).toLowerCase() + '.');
+  
+  return improved;
 }
 
 module.exports = { startTranscription }; 

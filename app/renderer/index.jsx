@@ -219,17 +219,50 @@ function App() {
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [templateDialog, setTemplateDialog] = useState({ open: false, mode: 'view', template: null });
+  const [showTemplateSelection, setShowTemplateSelection] = useState(false);
+  const [generatingReport, setGeneratingReport] = useState(false);
+  
+  // Report state
+  const [generatedReport, setGeneratedReport] = useState(null);
+  const [showReportDialog, setShowReportDialog] = useState(false);
+  const [userReports, setUserReports] = useState([]);
+  const [loadingReports, setLoadingReports] = useState(false);
 
   useEffect(() => {
     console.log('Setting up IPC listeners...');
     
     // Transcript updates
-    const transcriptHandler = (_, line) => {
-      setTranscript((prev) => {
-        const newTranscript = prev + (prev ? '\n' : '') + line;
-        setWordCount(newTranscript.split(/\s+/).filter(word => word.length > 0).length);
-        return newTranscript;
-      });
+    const transcriptHandler = (_, data) => {
+      if (typeof data === 'string') {
+        // Legacy format
+        setTranscript((prev) => {
+          const newTranscript = prev + (prev ? '\n' : '') + data;
+          setWordCount(newTranscript.split(/\s+/).filter(word => word.length > 0).length);
+          return newTranscript;
+        });
+      } else if (data.type === 'final') {
+        // Committed text - add permanently
+        setTranscript((prev) => {
+          const newTranscript = prev + (prev ? '\n' : '') + data.text;
+          setWordCount(newTranscript.split(/\s+/).filter(word => word.length > 0).length);
+          return newTranscript;
+        });
+      } else if (data.type === 'interim') {
+        // Interim text - show temporarily but don't save
+        setTranscript((prev) => {
+          // Remove any previous interim text and add new interim
+          const lines = prev.split('\n');
+          const finalLines = lines.filter(line => !line.startsWith('〉'));
+          const newTranscript = finalLines.join('\n') + (finalLines.length > 0 ? '\n' : '') + '〉 ' + data.text;
+          return newTranscript;
+        });
+      } else if (data.type === 'error' || data.type === 'system') {
+        // System messages
+        setTranscript((prev) => {
+          const newTranscript = prev + (prev ? '\n' : '') + data.text;
+          return newTranscript;
+        });
+      }
     };
     
     // Topics extracted
@@ -297,6 +330,11 @@ function App() {
   const stopTranscription = () => {
     ipcRenderer.send('stop-transcription');
     setIsListening(false);
+    
+    // Show template selection if we have sufficient transcript
+    if (transcript.length > 50) {
+      setShowTemplateSelection(true);
+    }
   };
 
   const generateMeetingNotes = async () => {
@@ -395,6 +433,7 @@ function App() {
   const openSettings = () => {
     loadSettings();
     loadMetrics();
+    loadUserReports();
     setShowSettings(true);
   };
 
@@ -452,12 +491,56 @@ function App() {
       const result = await ipcRenderer.invoke('generate-report', templateId, transcript, {}, Date.now().toString());
       if (result.success) {
         setSnackbar({ open: true, message: 'Report generated successfully!', severity: 'success' });
+        // Store the generated report and show it
+        setGeneratedReport({
+          id: result.reportId,
+          content: result.content,
+          metadata: result.metadata,
+          templateId: templateId,
+          template: templates.find(t => t._id === templateId),
+          generatedAt: new Date()
+        });
+        setShowReportDialog(true);
+        // Refresh user reports list
+        loadUserReports();
       } else {
         setSnackbar({ open: true, message: `Failed to generate report: ${result.error}`, severity: 'error' });
       }
     } catch (error) {
       console.error('Failed to generate report:', error);
       setSnackbar({ open: true, message: 'Failed to generate report', severity: 'error' });
+    }
+  };
+
+  const generateReportFromSelection = async (templateId) => {
+    setGeneratingReport(true);
+    setShowTemplateSelection(false);
+    
+    try {
+      setSnackbar({ open: true, message: 'Generating report from template...', severity: 'info' });
+      const result = await ipcRenderer.invoke('generate-report', templateId, transcript, {}, Date.now().toString());
+      if (result.success) {
+        setSnackbar({ open: true, message: 'Report generated successfully!', severity: 'success' });
+        // Store the generated report and show it
+        setGeneratedReport({
+          id: result.reportId,
+          content: result.content,
+          metadata: result.metadata,
+          templateId: templateId,
+          template: templates.find(t => t._id === templateId),
+          generatedAt: new Date()
+        });
+        setShowReportDialog(true);
+        // Refresh user reports list
+        loadUserReports();
+      } else {
+        setSnackbar({ open: true, message: `Failed to generate report: ${result.error}`, severity: 'error' });
+      }
+    } catch (error) {
+      console.error('Failed to generate report:', error);
+      setSnackbar({ open: true, message: 'Failed to generate report', severity: 'error' });
+    } finally {
+      setGeneratingReport(false);
     }
   };
 
@@ -493,6 +576,59 @@ function App() {
   useEffect(() => {
     loadTemplates();
   }, []);
+
+  // Report management functions
+  const loadUserReports = async () => {
+    setLoadingReports(true);
+    try {
+      const result = await ipcRenderer.invoke('get-user-reports');
+      if (result.success) {
+        setUserReports(result.reports);
+      } else {
+        console.error('Failed to load user reports:', result.error);
+      }
+    } catch (error) {
+      console.error('Failed to load user reports:', error);
+    } finally {
+      setLoadingReports(false);
+    }
+  };
+
+  const exportGeneratedReport = async (reportId) => {
+    try {
+      const result = await ipcRenderer.invoke('export-report', reportId, 'markdown');
+      if (result.success) {
+        setSnackbar({ open: true, message: `Report exported to ${result.filename}`, severity: 'success' });
+      } else {
+        setSnackbar({ open: true, message: 'Failed to export report', severity: 'error' });
+      }
+    } catch (error) {
+      console.error('Failed to export report:', error);
+      setSnackbar({ open: true, message: 'Failed to export report', severity: 'error' });
+    }
+  };
+
+  const viewReport = async (reportId) => {
+    try {
+      const result = await ipcRenderer.invoke('get-report', reportId);
+      if (result.success) {
+        setGeneratedReport({
+          id: result.report._id,
+          content: result.report.content,
+          metadata: result.report.metadata,
+          templateId: result.report.templateId,
+          template: { name: result.report.templateName },
+          generatedAt: new Date(result.report.generatedAt)
+        });
+        setShowReportDialog(true);
+      } else {
+        setSnackbar({ open: true, message: 'Failed to load report', severity: 'error' });
+      }
+    } catch (error) {
+      console.error('Failed to load report:', error);
+      setSnackbar({ open: true, message: 'Failed to load report', severity: 'error' });
+    }
+  };
 
   const renderMeetingNotes = () => {
     if (!meetingNotes) {
@@ -1109,16 +1245,41 @@ function App() {
                     border: '1px solid rgba(148, 163, 184, 0.1)',
                     mb: 3
                   }}>
-                    <Typography 
-                      variant="body1" 
-                      sx={{ 
-                        whiteSpace: 'pre-line',
-                        lineHeight: 1.8,
-                        color: transcript ? 'text.primary' : 'text.secondary',
-                      }}
-                    >
-                      {transcript || '🎙️ Start recording to see your conversation appear here in real-time...'}
-                    </Typography>
+                    {transcript ? (
+                      <Box>
+                        {transcript.split('\n').map((line, index) => {
+                          const isInterim = line.startsWith('〉');
+                          const displayText = isInterim ? line.substring(2) : line;
+                          
+                          return (
+                            <Typography 
+                              key={index}
+                              variant="body1" 
+                              sx={{ 
+                                lineHeight: 1.8,
+                                color: isInterim ? 'text.secondary' : 'text.primary',
+                                fontStyle: isInterim ? 'italic' : 'normal',
+                                opacity: isInterim ? 0.7 : 1,
+                                mb: 0.5,
+                                display: line.trim() ? 'block' : 'none'
+                              }}
+                            >
+                              {displayText}
+                            </Typography>
+                          );
+                        })}
+                      </Box>
+                    ) : (
+                      <Typography 
+                        variant="body1" 
+                        sx={{ 
+                          lineHeight: 1.8,
+                          color: 'text.secondary',
+                        }}
+                      >
+                        🎙️ Start recording to see your conversation appear here in real-time...
+                      </Typography>
+                    )}
                   </ScrollableBox>
 
                   {/* Fixed Record Button */}
@@ -1237,6 +1398,7 @@ function App() {
                   <Tab label="🤖 AI Provider" />
                   <Tab label="📊 Usage & Metrics" />
                   <Tab label="📝 Templates" />
+                  <Tab label="📄 Reports" />
                   <Tab label="🎤 Speech" />
                   <Tab label="🔍 Research" />
                   <Tab label="🎨 Interface" />
@@ -1745,8 +1907,104 @@ function App() {
                   </Box>
                 )}
 
-                {/* Speech Tab */}
+                {/* Reports Tab */}
                 {activeTab === 3 && (
+                  <Box sx={{ p: 3 }}>
+                    <Typography variant="h6" sx={{ mb: 3, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      📄 Generated Reports
+                    </Typography>
+                    
+                    {loadingReports ? (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+                        <CircularProgress />
+                      </Box>
+                    ) : (
+                      <Stack spacing={3}>
+                        {/* Report Actions */}
+                        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                          <Button 
+                            variant="contained" 
+                            onClick={loadUserReports}
+                            startIcon={loadingReports ? <CircularProgress size={16} /> : null}
+                            disabled={loadingReports}
+                          >
+                            Refresh Reports
+                          </Button>
+                        </Box>
+
+                        {/* Reports Grid */}
+                        <Grid container spacing={2}>
+                          {userReports.map((report) => (
+                            <Grid item xs={12} md={6} key={report._id}>
+                              <GlassCard sx={{ height: '100%' }}>
+                                <CardContent sx={{ p: 2 }}>
+                                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, mb: 2 }}>
+                                    <Typography sx={{ fontSize: '1.2em' }}>
+                                      📄
+                                    </Typography>
+                                    <Box sx={{ flex: 1 }}>
+                                      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
+                                        {report.templateName}
+                                      </Typography>
+                                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                                        Generated: {new Date(report.generatedAt).toLocaleString()}
+                                      </Typography>
+                                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 2 }}>
+                                        <Chip 
+                                          label={`${report.metadata?.tokensUsed || 0} tokens`} 
+                                          size="small" 
+                                          sx={{ 
+                                            background: 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)',
+                                            color: 'white',
+                                            fontSize: '10px'
+                                          }} 
+                                        />
+                                        <Typography variant="caption" color="text.secondary">
+                                          ${(report.metadata?.cost || 0).toFixed(4)}
+                                        </Typography>
+                                      </Box>
+                                    </Box>
+                                  </Box>
+                                  
+                                  <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+                                    <Button 
+                                      size="small" 
+                                      variant="contained"
+                                      onClick={() => viewReport(report._id)}
+                                    >
+                                      View Report
+                                    </Button>
+                                    <Button 
+                                      size="small" 
+                                      variant="outlined"
+                                      onClick={() => exportGeneratedReport(report._id)}
+                                    >
+                                      Export
+                                    </Button>
+                                  </Box>
+                                </CardContent>
+                              </GlassCard>
+                            </Grid>
+                          ))}
+                        </Grid>
+
+                        {userReports.length === 0 && (
+                          <Box sx={{ textAlign: 'center', py: 4 }}>
+                            <Typography color="text.secondary" sx={{ mb: 2 }}>
+                              📄 No reports generated yet
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              Generate reports from your transcripts using templates.
+                            </Typography>
+                          </Box>
+                        )}
+                      </Stack>
+                    )}
+                  </Box>
+                )}
+
+                {/* Speech Tab */}
+                {activeTab === 4 && (
                   <Box sx={{ p: 3 }}>
                     <Typography variant="h6" sx={{ mb: 3 }}>🎤 Speech Recognition</Typography>
                     <Typography variant="body2" color="text.secondary">
@@ -1757,7 +2015,7 @@ function App() {
                 )}
 
                 {/* Research Tab */}
-                {activeTab === 4 && (
+                {activeTab === 5 && (
                   <Box sx={{ p: 3 }}>
                     <Typography variant="h6" sx={{ mb: 3 }}>🔍 Research Sources</Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -1798,7 +2056,7 @@ function App() {
                 )}
 
                 {/* Interface Tab */}
-                {activeTab === 5 && (
+                {activeTab === 6 && (
                   <Box sx={{ p: 3 }}>
                     <Typography variant="h6" sx={{ mb: 3 }}>🎨 Interface Preferences</Typography>
                     
@@ -1853,6 +2111,235 @@ function App() {
               startIcon={null}
             >
               Save Settings
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Template Selection Dialog */}
+        <Dialog 
+          open={showTemplateSelection} 
+          onClose={() => setShowTemplateSelection(false)}
+          maxWidth="md"
+          fullWidth
+          sx={{
+            '& .MuiDialog-paper': {
+              bgcolor: 'background.paper',
+              backgroundImage: 'none',
+              border: '1px solid rgba(148, 163, 184, 0.1)',
+            }
+          }}
+        >
+          <DialogTitle sx={{ 
+            borderBottom: '1px solid rgba(148, 163, 184, 0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1
+          }}>
+            📝 Generate Report
+            <Typography variant="body2" color="text.secondary" sx={{ ml: 'auto' }}>
+              Select a template to generate your report
+            </Typography>
+          </DialogTitle>
+          
+          <DialogContent sx={{ p: 3 }}>
+            {generatingReport ? (
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4 }}>
+                <CircularProgress sx={{ mb: 2 }} />
+                <Typography variant="body1" color="text.secondary">
+                  Generating your report...
+                </Typography>
+              </Box>
+            ) : (
+              <Box>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                  Choose from the available templates below to generate a structured report from your {transcript.length} character transcript.
+                </Typography>
+                
+                <Grid container spacing={2}>
+                  {templates.map((template) => (
+                    <Grid item xs={12} sm={6} key={template._id}>
+                      <Card 
+                        sx={{ 
+                          height: '100%',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease',
+                          border: '1px solid rgba(148, 163, 184, 0.1)',
+                          '&:hover': {
+                            transform: 'translateY(-2px)',
+                            boxShadow: '0 8px 25px rgba(99, 102, 241, 0.15)',
+                            border: '1px solid rgba(99, 102, 241, 0.3)',
+                          }
+                        }}
+                        onClick={() => generateReportFromSelection(template._id)}
+                      >
+                        <CardContent sx={{ p: 2 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
+                            <Typography sx={{ fontSize: '1.5em' }}>
+                              {template.icon || '📄'}
+                            </Typography>
+                            <Box sx={{ flex: 1 }}>
+                              <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
+                                {template.name}
+                              </Typography>
+                              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                                {template.description}
+                              </Typography>
+                              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                                <Chip 
+                                  label={template.category} 
+                                  size="small" 
+                                  sx={{ 
+                                    background: 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)',
+                                    color: 'white',
+                                    fontSize: '10px'
+                                  }} 
+                                />
+                                {template.metadata?.usageCount > 0 && (
+                                  <Typography variant="caption" color="text.secondary">
+                                    Used {template.metadata.usageCount} times
+                                  </Typography>
+                                )}
+                              </Box>
+                            </Box>
+                          </Box>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                  ))}
+                </Grid>
+
+                {templates.length === 0 && (
+                  <Box sx={{ textAlign: 'center', py: 4 }}>
+                    <Typography color="text.secondary" sx={{ mb: 2 }}>
+                      📝 No templates available
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Templates are loading or no templates are configured.
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
+            )}
+          </DialogContent>
+          
+          <DialogActions sx={{ p: 3, pt: 0 }}>
+            <Button 
+              onClick={() => setShowTemplateSelection(false)}
+              disabled={generatingReport}
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={generateMeetingNotes}
+              variant="outlined"
+              disabled={generatingReport}
+            >
+              Generate Basic Notes Instead
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Report Display Dialog */}
+        <Dialog 
+          open={showReportDialog} 
+          onClose={() => setShowReportDialog(false)}
+          maxWidth="lg"
+          fullWidth
+          sx={{
+            '& .MuiDialog-paper': {
+              bgcolor: 'background.paper',
+              backgroundImage: 'none',
+              border: '1px solid rgba(148, 163, 184, 0.1)',
+              maxHeight: '90vh',
+            }
+          }}
+        >
+          <DialogTitle sx={{ 
+            borderBottom: '1px solid rgba(148, 163, 184, 0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1
+          }}>
+            📄 Generated Report
+            {generatedReport?.template && (
+              <Typography variant="body2" color="text.secondary" sx={{ ml: 'auto' }}>
+                {generatedReport.template.name}
+              </Typography>
+            )}
+          </DialogTitle>
+          
+          <DialogContent sx={{ p: 0 }}>
+            {generatedReport && (
+              <Box sx={{ p: 3 }}>
+                {/* Report Header */}
+                <Box sx={{ mb: 3, p: 2, bgcolor: 'rgba(99, 102, 241, 0.05)', borderRadius: 1 }}>
+                  <Typography variant="h6" sx={{ mb: 1 }}>
+                    {generatedReport.template?.name || 'Generated Report'}
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 2 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Generated: {generatedReport.generatedAt.toLocaleString()}
+                    </Typography>
+                    {generatedReport.metadata && (
+                      <>
+                        <Typography variant="body2" color="text.secondary">
+                          Tokens: {generatedReport.metadata.tokensUsed?.toLocaleString() || 0}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Cost: ${(generatedReport.metadata.cost || 0).toFixed(4)}
+                        </Typography>
+                      </>
+                    )}
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Button 
+                      size="small" 
+                      variant="contained"
+                      onClick={() => exportGeneratedReport(generatedReport.id)}
+                      startIcon={null}
+                    >
+                      Export Report
+                    </Button>
+                    <Button 
+                      size="small" 
+                      variant="outlined"
+                      onClick={() => navigator.clipboard.writeText(generatedReport.content)}
+                    >
+                      Copy Content
+                    </Button>
+                  </Box>
+                </Box>
+
+                {/* Report Content */}
+                <Box sx={{ 
+                  p: 3,
+                  bgcolor: 'rgba(15, 23, 42, 0.3)',
+                  borderRadius: 2,
+                  border: '1px solid rgba(148, 163, 184, 0.1)',
+                  maxHeight: '60vh',
+                  overflowY: 'auto'
+                }}>
+                  <pre style={{ 
+                    whiteSpace: 'pre-wrap',
+                    fontFamily: 'inherit',
+                    fontSize: '14px',
+                    lineHeight: '1.6',
+                    margin: 0,
+                    color: 'inherit'
+                  }}>
+                    {generatedReport.content}
+                  </pre>
+                </Box>
+              </Box>
+            )}
+          </DialogContent>
+          
+          <DialogActions sx={{ p: 3, pt: 0 }}>
+            <Button 
+              onClick={() => setShowReportDialog(false)}
+              variant="outlined"
+            >
+              Close
             </Button>
           </DialogActions>
         </Dialog>

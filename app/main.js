@@ -10,6 +10,9 @@ const { getAvailableProviders, testConnection, updateSettings } = require('./ser
 const { getDashboardSummary, getCurrentSessionMetrics, exportUsageData, startNewSession } = require('./services/usageTracker');
 const { saveSession, loadRecentSessions } = require('./storage');
 const { loadConfig, saveConfig } = require('./config');
+const { connect: connectMongo, getTemplates, createTemplate, updateTemplate, deleteTemplate } = require('./services/mongoStorage');
+const { initializeDatabase, createCustomTemplate, updateCustomTemplate, deleteCustomTemplate, getTemplatesByCategory, searchTemplates, validateTemplateSchema, importTemplate, exportTemplate, exportAllTemplates, importTemplateCollection } = require('./services/templateManager');
+const { generateReport, getReport, getSessionReports, getUserReports, exportReport } = require('./services/reportGenerator');
 
 let mainWindow;
 let whisperProc = null;
@@ -79,7 +82,22 @@ function setupProcessorHandlers() {
   });
 }
 
-app.whenReady().then(createWindow);
+// Initialize MongoDB connection and default templates
+async function initializeServices() {
+  try {
+    await connectMongo();
+    await initializeDatabase();
+    console.log('All services initialized successfully');
+  } catch (error) {
+    console.error('Error initializing services:', error);
+    // Continue without MongoDB if connection fails
+  }
+}
+
+app.whenReady().then(() => {
+  createWindow();
+  initializeServices();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
@@ -368,6 +386,230 @@ ipcMain.handle('export-usage-data', async () => {
     
   } catch (error) {
     console.error('Error exporting usage data:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Get all templates
+ipcMain.handle('get-templates', async (_, filter = {}) => {
+  try {
+    const templates = await getTemplates(filter);
+    console.log('Retrieved templates from storage:', templates.length);
+    // Debug template IDs
+    templates.forEach((template, index) => {
+      console.log(`Template ${index} ID:`, template._id, 'Type:', typeof template._id, 'Name:', template.name);
+    });
+    return { success: true, templates };
+  } catch (error) {
+    console.error('Error getting templates:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Get templates by category
+ipcMain.handle('get-templates-by-category', async (_, category) => {
+  try {
+    const templates = await getTemplatesByCategory(category);
+    return { success: true, templates };
+  } catch (error) {
+    console.error('Error getting templates by category:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Search templates
+ipcMain.handle('search-templates', async (_, searchTerm) => {
+  try {
+    const templates = await searchTemplates(searchTerm);
+    return { success: true, templates };
+  } catch (error) {
+    console.error('Error searching templates:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Create custom template
+ipcMain.handle('create-template', async (_, templateData) => {
+  try {
+    const template = await createCustomTemplate(templateData);
+    return { success: true, template };
+  } catch (error) {
+    console.error('Error creating template:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Update template
+ipcMain.handle('update-template', async (_, templateId, updates) => {
+  try {
+    const result = await updateCustomTemplate(templateId, updates);
+    return { success: result };
+  } catch (error) {
+    console.error('Error updating template:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Delete template
+ipcMain.handle('delete-template', async (_, templateId) => {
+  try {
+    const result = await deleteCustomTemplate(templateId);
+    return { success: result };
+  } catch (error) {
+    console.error('Error deleting template:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Generate report from template
+ipcMain.handle('generate-report', async (_, templateId, transcript, variables, sessionId) => {
+  try {
+    console.log('Generating report with template ID:', templateId);
+    console.log('Template ID type:', typeof templateId);
+    console.log('Template ID value:', templateId);
+    const result = await generateReport(templateId, transcript, variables, sessionId);
+    return result;
+  } catch (error) {
+    console.error('Error generating report:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC: Get report by ID
+ipcMain.handle('get-report', async (_, reportId) => {
+  try {
+    const result = await getReport(reportId);
+    return result;
+  } catch (error) {
+    console.error('Error getting report:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Get reports for session
+ipcMain.handle('get-session-reports', async (_, sessionId) => {
+  try {
+    const result = await getSessionReports(sessionId);
+    return result;
+  } catch (error) {
+    console.error('Error getting session reports:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Get user reports
+ipcMain.handle('get-user-reports', async (_, filter = {}, options = {}) => {
+  try {
+    const result = await getUserReports(filter, options);
+    return result;
+  } catch (error) {
+    console.error('Error getting user reports:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Export report
+ipcMain.handle('export-report', async (_, reportId, format = 'markdown') => {
+  try {
+    const result = await exportReport(reportId, format);
+    
+    if (result.success) {
+      // Save to Downloads folder
+      const downloadsPath = path.join(os.homedir(), 'Downloads');
+      const filepath = path.join(downloadsPath, result.filename);
+      
+      fs.writeFileSync(filepath, result.content);
+      
+      console.log(`Report exported to: ${filepath}`);
+      return { success: true, filepath, filename: result.filename };
+    }
+    
+    return result;
+  } catch (error) {
+    console.error('Error exporting report:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Validate template schema
+ipcMain.handle('validate-template-schema', async (_, templateData) => {
+  try {
+    const errors = validateTemplateSchema(templateData);
+    return { success: true, errors };
+  } catch (error) {
+    console.error('Error validating template schema:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Import template from JSON
+ipcMain.handle('import-template', async (_, templateJson) => {
+  try {
+    const result = await importTemplate(templateJson);
+    return { success: true, template: result };
+  } catch (error) {
+    console.error('Error importing template:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Export template to JSON
+ipcMain.handle('export-template-json', async (_, templateId) => {
+  try {
+    console.log('Export template IPC called with ID:', templateId, typeof templateId);
+    const result = await exportTemplate(templateId);
+    console.log('Export template result:', result);
+    
+    if (result.success) {
+      // Save to Downloads folder
+      const downloadsPath = path.join(os.homedir(), 'Downloads');
+      const filepath = path.join(downloadsPath, result.filename);
+      
+      fs.writeFileSync(filepath, JSON.stringify(result.template, null, 2));
+      
+      console.log(`Template exported to: ${filepath}`);
+      return { success: true, filepath, filename: result.filename };
+    }
+    
+    return result;
+  } catch (error) {
+    console.error('Error exporting template:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC: Export all templates
+ipcMain.handle('export-all-templates', async () => {
+  try {
+    console.log('Export all templates IPC called');
+    const result = await exportAllTemplates();
+    console.log('Export all templates result:', result);
+    
+    if (result.success) {
+      // Save to Downloads folder
+      const downloadsPath = path.join(os.homedir(), 'Downloads');
+      const filepath = path.join(downloadsPath, result.filename);
+      
+      fs.writeFileSync(filepath, JSON.stringify(result.data, null, 2));
+      
+      console.log(`All templates exported to: ${filepath}`);
+      return { success: true, filepath, filename: result.filename };
+    }
+    
+    return result;
+  } catch (error) {
+    console.error('Error exporting all templates:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC: Import template collection
+ipcMain.handle('import-template-collection', async (_, collectionJson) => {
+  try {
+    const result = await importTemplateCollection(collectionJson);
+    return result;
+  } catch (error) {
+    console.error('Error importing template collection:', error);
     return { error: error.message };
   }
 }); 

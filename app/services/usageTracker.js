@@ -38,7 +38,8 @@ class UsageTracker {
       operations: {
         topicExtraction: { count: 0, tokens: 0, cost: 0 },
         meetingNotes: { count: 0, tokens: 0, cost: 0 },
-        research: { count: 0, tokens: 0, cost: 0 }
+        research: { count: 0, tokens: 0, cost: 0 },
+        reportGeneration: { count: 0, tokens: 0, cost: 0 }
       }
     };
   }
@@ -71,7 +72,8 @@ class UsageTracker {
       operationBreakdown: {
         topicExtraction: { count: 0, tokens: 0, cost: 0 },
         meetingNotes: { count: 0, tokens: 0, cost: 0 },
-        research: { count: 0, tokens: 0, cost: 0 }
+        research: { count: 0, tokens: 0, cost: 0 },
+        reportGeneration: { count: 0, tokens: 0, cost: 0 }
       }
     };
   }
@@ -100,7 +102,8 @@ class UsageTracker {
       operations: {
         topicExtraction: { count: 0, tokens: 0, cost: 0 },
         meetingNotes: { count: 0, tokens: 0, cost: 0 },
-        research: { count: 0, tokens: 0, cost: 0 }
+        research: { count: 0, tokens: 0, cost: 0 },
+        reportGeneration: { count: 0, tokens: 0, cost: 0 }
       }
     };
     

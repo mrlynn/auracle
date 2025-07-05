@@ -1,0 +1,138 @@
+{
+  "name": "Custom Research Report",
+  "description": "Comprehensive research report with customizable sections and analysis depth",
+  "category": "Custom",
+  "version": "1.2.0",
+  "icon": "🔬",
+  "prompt": "You are a professional research analyst. Create a comprehensive research report based on the following transcript and parameters.\n\nResearch Parameters:\n- Topic: {{researchTopic}}\n- Analysis Depth: {{analysisDepth}}\n- Target Audience: {{targetAudience}}\n- Report Date: {{reportDate}}\n- Researcher: {{researcherName}}\n\n{{#if focusAreas}}\nSpecific Focus Areas: {{focusAreas}}\n{{/if}}\n\nTranscript Content:\n{{transcript}}\n\n{{#if additionalSources}}\nAdditional Sources:\n{{additionalSources}}\n{{/if}}\n\nPlease generate a research report with the following structure:\n1. Executive Summary\n2. Research Methodology\n3. Key Findings\n4. Data Analysis\n5. Insights and Patterns\n6. Recommendations\n7. Limitations and Future Research\n8. Conclusion\n\nAdjust the depth and technical complexity based on the specified analysis depth and target audience.",
+  "variables": [
+    {
+      "name": "researchTopic",
+      "type": "text",
+      "label": "Research Topic",
+      "placeholder": "Main topic or subject of research",
+      "required": true
+    },
+    {
+      "name": "analysisDepth",
+      "type": "select",
+      "label": "Analysis Depth",
+      "required": true,
+      "default": "medium",
+      "options": ["shallow", "medium", "deep", "comprehensive"]
+    },
+    {
+      "name": "targetAudience",
+      "type": "select",
+      "label": "Target Audience",
+      "required": true,
+      "default": "general",
+      "options": ["general", "academic", "executive", "technical", "public"]
+    },
+    {
+      "name": "reportDate",
+      "type": "date",
+      "label": "Report Date",
+      "required": true
+    },
+    {
+      "name": "researcherName",
+      "type": "text",
+      "label": "Researcher Name",
+      "placeholder": "Name of the researcher or team",
+      "required": false,
+      "default": "Research Team"
+    },
+    {
+      "name": "focusAreas",
+      "type": "textarea",
+      "label": "Specific Focus Areas",
+      "placeholder": "List specific areas to focus on (optional)",
+      "required": false
+    },
+    {
+      "name": "additionalSources",
+      "type": "textarea",
+      "label": "Additional Sources",
+      "placeholder": "List any additional sources or references (optional)",
+      "required": false
+    }
+  ],
+  "outputFormat": "markdown",
+  "sections": [
+    {
+      "title": "Executive Summary",
+      "key": "execSummary",
+      "required": true,
+      "description": "High-level overview of findings"
+    },
+    {
+      "title": "Research Methodology",
+      "key": "methodology",
+      "required": true,
+      "description": "How the research was conducted"
+    },
+    {
+      "title": "Key Findings",
+      "key": "findings",
+      "required": true,
+      "description": "Main discoveries and results"
+    },
+    {
+      "title": "Data Analysis",
+      "key": "analysis",
+      "required": true,
+      "description": "Detailed analysis of the data"
+    },
+    {
+      "title": "Insights and Patterns",
+      "key": "insights",
+      "required": true,
+      "description": "Patterns and insights discovered"
+    },
+    {
+      "title": "Recommendations",
+      "key": "recommendations",
+      "required": true,
+      "description": "Actionable recommendations"
+    },
+    {
+      "title": "Limitations",
+      "key": "limitations",
+      "required": false,
+      "description": "Research limitations and future work"
+    },
+    {
+      "title": "Conclusion",
+      "key": "conclusion",
+      "required": true,
+      "description": "Summary and final thoughts"
+    }
+  ],
+  "metadata": {
+    "author": "Template Creator",
+    "createdAt": "2024-01-15T10:30:00Z",
+    "tags": ["research", "analysis", "custom", "comprehensive"],
+    "isDefault": false,
+    "minimumTranscriptLength": 200,
+    "estimatedTokens": 800,
+    "language": "en"
+  },
+  "examples": [
+    {
+      "name": "Market Research Example",
+      "description": "Example for market research analysis",
+      "variables": {
+        "researchTopic": "Consumer Behavior in E-commerce",
+        "analysisDepth": "comprehensive",
+        "targetAudience": "executive",
+        "reportDate": "2024-01-15",
+        "researcherName": "Dr. Sarah Johnson",
+        "focusAreas": "Purchase patterns, mobile usage, seasonal trends",
+        "additionalSources": "Industry reports from Statista, Nielsen data"
+      },
+      "sampleTranscript": "During our focus group session, participants discussed their online shopping habits. Most mentioned preferring mobile apps for quick purchases but using desktop for research. Seasonal shopping peaks were noted around holidays...",
+      "expectedOutput": "# Market Research Report: Consumer Behavior in E-commerce\n\n## Executive Summary\nThis comprehensive analysis reveals key insights into consumer behavior patterns in e-commerce...\n\n..."
+    }
+  ]
+}

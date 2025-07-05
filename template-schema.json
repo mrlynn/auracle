@@ -1,0 +1,192 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Auracle Report Template",
+  "description": "Schema for Auracle report templates that can be imported and exported",
+  "type": "object",
+  "required": ["name", "description", "category", "prompt", "version"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Display name of the template",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "description": {
+      "type": "string",
+      "description": "Brief description of what this template generates",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "category": {
+      "type": "string",
+      "description": "Category for organizing templates",
+      "enum": ["Business", "HR", "Sales", "Healthcare", "Legal", "Education", "Technology", "Finance", "Custom"]
+    },
+    "version": {
+      "type": "string",
+      "description": "Template version for compatibility",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "icon": {
+      "type": "string",
+      "description": "Icon name or emoji for display",
+      "default": "📄"
+    },
+    "prompt": {
+      "type": "string",
+      "description": "The main prompt template with variable placeholders",
+      "minLength": 10
+    },
+    "variables": {
+      "type": "array",
+      "description": "Variables that can be substituted in the prompt",
+      "items": {
+        "type": "object",
+        "required": ["name", "type"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Variable name (used in {{variable}} placeholders)",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$"
+          },
+          "type": {
+            "type": "string",
+            "description": "Input type for the variable",
+            "enum": ["text", "textarea", "select", "date", "number", "email", "url"]
+          },
+          "label": {
+            "type": "string",
+            "description": "Human-readable label for the input",
+            "default": ""
+          },
+          "placeholder": {
+            "type": "string",
+            "description": "Placeholder text for the input",
+            "default": ""
+          },
+          "required": {
+            "type": "boolean",
+            "description": "Whether this variable is required",
+            "default": false
+          },
+          "default": {
+            "type": "string",
+            "description": "Default value for the variable",
+            "default": ""
+          },
+          "options": {
+            "type": "array",
+            "description": "Options for select type variables",
+            "items": {
+              "type": "string"
+            }
+          },
+          "validation": {
+            "type": "object",
+            "description": "Validation rules for the variable",
+            "properties": {
+              "min": {"type": "number"},
+              "max": {"type": "number"},
+              "pattern": {"type": "string"},
+              "message": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "outputFormat": {
+      "type": "string",
+      "description": "Expected output format",
+      "enum": ["markdown", "html", "json", "plain"],
+      "default": "markdown"
+    },
+    "sections": {
+      "type": "array",
+      "description": "Expected sections in the output (for UI hints)",
+      "items": {
+        "type": "object",
+        "required": ["title", "key"],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Section title"
+          },
+          "key": {
+            "type": "string",
+            "description": "Section identifier"
+          },
+          "required": {
+            "type": "boolean",
+            "description": "Whether this section is required",
+            "default": true
+          },
+          "description": {
+            "type": "string",
+            "description": "Description of what this section should contain"
+          }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Additional metadata about the template",
+      "properties": {
+        "author": {
+          "type": "string",
+          "description": "Template author"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the template was created"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the template was last updated"
+        },
+        "tags": {
+          "type": "array",
+          "description": "Tags for searchability",
+          "items": {
+            "type": "string"
+          }
+        },
+        "isDefault": {
+          "type": "boolean",
+          "description": "Whether this is a system default template",
+          "default": false
+        },
+        "minimumTranscriptLength": {
+          "type": "number",
+          "description": "Minimum transcript length required",
+          "default": 50
+        },
+        "estimatedTokens": {
+          "type": "number",
+          "description": "Estimated tokens this template will use"
+        },
+        "language": {
+          "type": "string",
+          "description": "Primary language for this template",
+          "default": "en"
+        }
+      }
+    },
+    "examples": {
+      "type": "array",
+      "description": "Example inputs and outputs for this template",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "description": {"type": "string"},
+          "variables": {"type": "object"},
+          "sampleTranscript": {"type": "string"},
+          "expectedOutput": {"type": "string"}
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,97 @@
+{
+  "name": "Meeting Minutes",
+  "description": "Professional meeting minutes with action items and decisions",
+  "category": "Business",
+  "version": "1.0.0",
+  "icon": "💼",
+  "prompt": "You are a professional meeting secretary. Analyze the following transcript and create structured meeting minutes.\n\nMeeting Details:\n- Date: {{meetingDate}}\n- Attendees: {{attendees}}\n- Meeting Type: {{meetingType}}\n\nTranscript:\n{{transcript}}\n\n{{#if additionalContext}}\nAdditional Context: {{additionalContext}}\n{{/if}}\n\nPlease generate meeting minutes with the following sections:\n1. Meeting Summary (2-3 sentences)\n2. Key Discussion Points (bullet points)\n3. Decisions Made (with context and impact)\n4. Action Items (with assignees and deadlines if mentioned)\n5. Next Steps\n\nFormat the output in clean markdown with clear headers and formatting.",
+  "variables": [
+    {
+      "name": "meetingDate",
+      "type": "date",
+      "label": "Meeting Date",
+      "required": true,
+      "default": ""
+    },
+    {
+      "name": "attendees",
+      "type": "textarea",
+      "label": "Attendees",
+      "placeholder": "List meeting attendees (one per line or comma-separated)",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "meetingType",
+      "type": "select",
+      "label": "Meeting Type",
+      "required": true,
+      "default": "regular",
+      "options": ["regular", "standup", "planning", "retrospective", "strategy", "client", "all-hands"]
+    },
+    {
+      "name": "additionalContext",
+      "type": "textarea",
+      "label": "Additional Context",
+      "placeholder": "Any additional context about the meeting (optional)",
+      "required": false,
+      "default": ""
+    }
+  ],
+  "outputFormat": "markdown",
+  "sections": [
+    {
+      "title": "Meeting Summary",
+      "key": "summary",
+      "required": true,
+      "description": "Brief 2-3 sentence overview of the meeting"
+    },
+    {
+      "title": "Key Discussion Points",
+      "key": "keyPoints",
+      "required": true,
+      "description": "Main topics discussed in bullet point format"
+    },
+    {
+      "title": "Decisions Made",
+      "key": "decisions",
+      "required": true,
+      "description": "Important decisions with context and impact"
+    },
+    {
+      "title": "Action Items",
+      "key": "actionItems",
+      "required": true,
+      "description": "Tasks assigned with owners and deadlines"
+    },
+    {
+      "title": "Next Steps",
+      "key": "nextSteps",
+      "required": false,
+      "description": "Planned follow-up actions"
+    }
+  ],
+  "metadata": {
+    "author": "Auracle System",
+    "createdAt": "2024-01-01T00:00:00Z",
+    "tags": ["meeting", "business", "minutes", "corporate"],
+    "isDefault": true,
+    "minimumTranscriptLength": 100,
+    "estimatedTokens": 500,
+    "language": "en"
+  },
+  "examples": [
+    {
+      "name": "Weekly Team Meeting",
+      "description": "Example of a weekly team standup meeting",
+      "variables": {
+        "meetingDate": "2024-01-15",
+        "attendees": "John Smith, Jane Doe, Mike Johnson",
+        "meetingType": "standup",
+        "additionalContext": "Weekly team sync to discuss progress and blockers"
+      },
+      "sampleTranscript": "Good morning everyone. Let's start with John's updates. John mentioned completing the user authentication feature and working on the database integration next. Jane reported finishing the UI mockups and starting frontend implementation. Mike discussed resolving the deployment pipeline issues and planning the next sprint.",
+      "expectedOutput": "# Meeting Minutes\n\n## Meeting Summary\nWeekly team standup focused on project progress updates and next sprint planning.\n\n## Key Discussion Points\n- User authentication feature completion\n- UI mockup finalization\n- Deployment pipeline fixes\n\n..."
+    }
+  ]
+}

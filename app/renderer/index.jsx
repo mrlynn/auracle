@@ -213,6 +213,12 @@ function App() {
   const [usageMetrics, setUsageMetrics] = useState(null);
   const [currentSessionMetrics, setCurrentSessionMetrics] = useState(null);
   const [loadingMetrics, setLoadingMetrics] = useState(false);
+  
+  // Template state
+  const [templates, setTemplates] = useState([]);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [templateDialog, setTemplateDialog] = useState({ open: false, mode: 'view', template: null });
 
   useEffect(() => {
     console.log('Setting up IPC listeners...');
@@ -421,6 +427,72 @@ function App() {
       setSnackbar({ open: true, message: 'Failed to export usage data', severity: 'error' });
     }
   };
+
+  // Template functions
+  const loadTemplates = async () => {
+    setLoadingTemplates(true);
+    try {
+      const result = await ipcRenderer.invoke('get-templates');
+      if (result.success) {
+        setTemplates(result.templates);
+      } else {
+        setSnackbar({ open: true, message: 'Failed to load templates', severity: 'error' });
+      }
+    } catch (error) {
+      console.error('Failed to load templates:', error);
+      setSnackbar({ open: true, message: 'Failed to load templates', severity: 'error' });
+    } finally {
+      setLoadingTemplates(false);
+    }
+  };
+
+  const generateReport = async (templateId) => {
+    try {
+      setSnackbar({ open: true, message: 'Generating report...', severity: 'info' });
+      const result = await ipcRenderer.invoke('generate-report', templateId, transcript, {}, Date.now().toString());
+      if (result.success) {
+        setSnackbar({ open: true, message: 'Report generated successfully!', severity: 'success' });
+      } else {
+        setSnackbar({ open: true, message: `Failed to generate report: ${result.error}`, severity: 'error' });
+      }
+    } catch (error) {
+      console.error('Failed to generate report:', error);
+      setSnackbar({ open: true, message: 'Failed to generate report', severity: 'error' });
+    }
+  };
+
+  const exportTemplate = async (templateId) => {
+    try {
+      const result = await ipcRenderer.invoke('export-template-json', templateId);
+      if (result.success) {
+        setSnackbar({ open: true, message: 'Template exported successfully!', severity: 'success' });
+      } else {
+        setSnackbar({ open: true, message: 'Failed to export template', severity: 'error' });
+      }
+    } catch (error) {
+      console.error('Failed to export template:', error);
+      setSnackbar({ open: true, message: 'Failed to export template', severity: 'error' });
+    }
+  };
+
+  const exportAllTemplates = async () => {
+    try {
+      const result = await ipcRenderer.invoke('export-all-templates');
+      if (result.success) {
+        setSnackbar({ open: true, message: 'All templates exported successfully!', severity: 'success' });
+      } else {
+        setSnackbar({ open: true, message: 'Failed to export templates', severity: 'error' });
+      }
+    } catch (error) {
+      console.error('Failed to export all templates:', error);
+      setSnackbar({ open: true, message: 'Failed to export templates', severity: 'error' });
+    }
+  };
+
+  // Load templates on component mount
+  useEffect(() => {
+    loadTemplates();
+  }, []);
 
   const renderMeetingNotes = () => {
     if (!meetingNotes) {
@@ -1164,6 +1236,7 @@ function App() {
                 >
                   <Tab label="🤖 AI Provider" />
                   <Tab label="📊 Usage & Metrics" />
+                  <Tab label="📝 Templates" />
                   <Tab label="🎤 Speech" />
                   <Tab label="🔍 Research" />
                   <Tab label="🎨 Interface" />
@@ -1567,8 +1640,113 @@ function App() {
                   </Box>
                 )}
 
-                {/* Speech Tab */}
+                {/* Templates Tab */}
                 {activeTab === 2 && (
+                  <Box sx={{ p: 3 }}>
+                    <Typography variant="h6" sx={{ mb: 3, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      📝 Report Templates
+                    </Typography>
+                    
+                    {loadingTemplates ? (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+                        <CircularProgress />
+                      </Box>
+                    ) : (
+                      <Stack spacing={3}>
+                        {/* Template Actions */}
+                        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                          <Button 
+                            variant="contained" 
+                            onClick={loadTemplates}
+                            startIcon={loadingTemplates ? <CircularProgress size={16} /> : null}
+                            disabled={loadingTemplates}
+                          >
+                            Refresh Templates
+                          </Button>
+                          <Button 
+                            variant="outlined" 
+                            onClick={exportAllTemplates}
+                          >
+                            Export All Templates
+                          </Button>
+                        </Box>
+
+                        {/* Templates Grid */}
+                        <Grid container spacing={2}>
+                          {templates.map((template) => (
+                            <Grid item xs={12} md={6} key={template._id}>
+                              <GlassCard sx={{ height: '100%' }}>
+                                <CardContent sx={{ p: 2 }}>
+                                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, mb: 2 }}>
+                                    <Typography sx={{ fontSize: '1.2em' }}>
+                                      {template.icon || '📄'}
+                                    </Typography>
+                                    <Box sx={{ flex: 1 }}>
+                                      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
+                                        {template.name}
+                                      </Typography>
+                                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                                        {template.description}
+                                      </Typography>
+                                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 2 }}>
+                                        <Chip 
+                                          label={template.category} 
+                                          size="small" 
+                                          sx={{ 
+                                            background: 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)',
+                                            color: 'white',
+                                            fontSize: '10px'
+                                          }} 
+                                        />
+                                        {template.metadata?.usageCount > 0 && (
+                                          <Typography variant="caption" color="text.secondary">
+                                            Used {template.metadata.usageCount} times
+                                          </Typography>
+                                        )}
+                                      </Box>
+                                    </Box>
+                                  </Box>
+                                  
+                                  <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+                                    <Button 
+                                      size="small" 
+                                      variant="contained"
+                                      onClick={() => generateReport(template._id)}
+                                      disabled={transcript.length < 10}
+                                    >
+                                      Generate Report
+                                    </Button>
+                                    <Button 
+                                      size="small" 
+                                      variant="outlined"
+                                      onClick={() => exportTemplate(template._id)}
+                                    >
+                                      Export
+                                    </Button>
+                                  </Box>
+                                </CardContent>
+                              </GlassCard>
+                            </Grid>
+                          ))}
+                        </Grid>
+
+                        {templates.length === 0 && (
+                          <Box sx={{ textAlign: 'center', py: 4 }}>
+                            <Typography color="text.secondary" sx={{ mb: 2 }}>
+                              📝 No templates available
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              Templates will be loaded automatically when the database is available.
+                            </Typography>
+                          </Box>
+                        )}
+                      </Stack>
+                    )}
+                  </Box>
+                )}
+
+                {/* Speech Tab */}
+                {activeTab === 3 && (
                   <Box sx={{ p: 3 }}>
                     <Typography variant="h6" sx={{ mb: 3 }}>🎤 Speech Recognition</Typography>
                     <Typography variant="body2" color="text.secondary">
@@ -1579,7 +1757,7 @@ function App() {
                 )}
 
                 {/* Research Tab */}
-                {activeTab === 2 && (
+                {activeTab === 4 && (
                   <Box sx={{ p: 3 }}>
                     <Typography variant="h6" sx={{ mb: 3 }}>🔍 Research Sources</Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -1620,7 +1798,7 @@ function App() {
                 )}
 
                 {/* Interface Tab */}
-                {activeTab === 3 && (
+                {activeTab === 5 && (
                   <Box sx={{ p: 3 }}>
                     <Typography variant="h6" sx={{ mb: 3 }}>🎨 Interface Preferences</Typography>
                     

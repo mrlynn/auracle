@@ -212,7 +212,7 @@ class OllamaProvider extends BaseProvider {
   async testConnection(config) {
     try {
       const response = await this.makeRequest(config.llm.endpoint || 'http://localhost:11434', '/api/tags', 'GET');
-      return response && response.models;
+      return !!(response && response.models);
     } catch (error) {
       console.error('Ollama connection test failed:', error);
       return false;
@@ -297,7 +297,7 @@ class OpenAIProvider extends BaseProvider {
     
     try {
       const response = await this.makeAPIRequest(config, '/models', 'GET');
-      return response && response.data;
+      return !!(response && response.data);
     } catch (error) {
       console.error('OpenAI connection test failed:', error);
       return false;
@@ -371,7 +371,7 @@ class GeminiProvider extends BaseProvider {
     
     try {
       const response = await this.makeAPIRequest(config, '/models', 'GET');
-      return response && response.models;
+      return !!(response && response.models);
     } catch (error) {
       console.error('Gemini connection test failed:', error);
       return false;

@@ -5,7 +5,7 @@ import {
   Alert, Link, Stack, Card,
   AppBar, Toolbar, Fab, Fade, Avatar, Dialog,
   DialogTitle, DialogContent, DialogActions, Button, 
-  IconButton, Snackbar
+  IconButton, Snackbar, FormControl, Select, MenuItem
 } from '@mui/material';
 import { styled, createTheme, ThemeProvider } from '@mui/material/styles';
 
@@ -784,6 +784,11 @@ function App() {
     loadTemplates();
   }, []);
 
+  // Load settings and LLM providers on component mount
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
   // Report management functions
   const loadUserReports = async () => {
     setLoadingReports(true);
@@ -1338,6 +1343,53 @@ function App() {
                   {ollamaConnected ? 'AI Connected' : 'AI Disconnected'}
                 </Typography>
               </StatusIndicator>
+
+              {/* LLM Provider Selector */}
+              <FormControl size="small" sx={{ minWidth: 120 }}>
+                <Select
+                  value={settings.llm?.provider || 'ollama'}
+                  onChange={(e) => {
+                    const newProvider = e.target.value;
+                    const newSettings = {
+                      ...settings,
+                      llm: { ...settings.llm, provider: newProvider }
+                    };
+                    setSettings(newSettings);
+                    handleSettingsUpdate(newSettings);
+                  }}
+                  displayEmpty
+                  variant="outlined"
+                  sx={{
+                    height: 32,
+                    bgcolor: 'rgba(99, 102, 241, 0.1)',
+                    border: '1px solid rgba(99, 102, 241, 0.2)',
+                    borderRadius: 1,
+                    color: 'primary.light',
+                    fontSize: '13px',
+                    '& .MuiSelect-select': {
+                      py: 0.5,
+                      px: 1.5
+                    },
+                    '& .MuiOutlinedInput-notchedOutline': {
+                      border: 'none'
+                    },
+                    '&:hover': {
+                      bgcolor: 'rgba(99, 102, 241, 0.15)',
+                      borderColor: 'primary.main'
+                    }
+                  }}
+                >
+                  {llmProviders.map(provider => (
+                    <MenuItem key={provider.id} value={provider.id}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Typography variant="body2" sx={{ fontSize: '13px' }}>
+                          {provider.name}
+                        </Typography>
+                      </Box>
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
               
               {wordCount > 0 && (
                 <Chip 

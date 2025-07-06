@@ -169,6 +169,58 @@ function setupProcessorHandlers() {
     console.error('Processor error:', error);
     mainWindow.webContents.send('processor-error', error.message);
   });
+
+  // NEW: Handle real-time insights
+  processor.on('realtime-insight', (insight) => {
+    console.log('🧠 Real-time insight generated:', insight.type);
+    mainWindow.webContents.send('realtime-insight', insight);
+    if (currentSession) {
+      if (!currentSession.realtimeInsights) {
+        currentSession.realtimeInsights = [];
+      }
+      currentSession.realtimeInsights.push(insight);
+      // Keep only last 20 insights per session
+      if (currentSession.realtimeInsights.length > 20) {
+        currentSession.realtimeInsights = currentSession.realtimeInsights.slice(-20);
+      }
+    }
+  });
+
+  // NEW: Handle executive summary updates
+  processor.on('executive-summary-updated', (summary) => {
+    console.log('📄 Executive summary updated');
+    mainWindow.webContents.send('executive-summary-updated', summary);
+    if (currentSession) {
+      currentSession.executiveSummary = summary;
+      currentSession.summaryUpdatedAt = new Date().toISOString();
+    }
+  });
+
+  // NEW: Handle slides generation
+  processor.on('slides-generated', (slides) => {
+    console.log('📊 Slides generated:', slides.length, 'slides');
+    mainWindow.webContents.send('slides-generated', slides);
+    if (currentSession) {
+      currentSession.generatedSlides = slides;
+      currentSession.slidesGeneratedAt = new Date().toISOString();
+    }
+  });
+
+  // NEW: Handle knowledge graph updates
+  processor.on('knowledge-graph-updated', (graphData) => {
+    console.log('🕸️ Knowledge graph updated:', graphData.nodes.length, 'nodes');
+    mainWindow.webContents.send('knowledge-graph-updated', graphData);
+  });
+
+  // NEW: Handle topic additions to knowledge graph
+  processor.on('topic-added', (data) => {
+    mainWindow.webContents.send('topic-added', data);
+  });
+
+  // NEW: Handle connection additions to knowledge graph
+  processor.on('connection-added', (data) => {
+    mainWindow.webContents.send('connection-added', data);
+  });
 }
 
 // Initialize MongoDB connection and default templates
@@ -430,7 +482,67 @@ ipcMain.on('check-ollama-status', async () => {
   mainWindow.webContents.send('ollama-status', connected);
 });
 
-// IPC: Trigger research for specific topics
+// IPC: Trigger immediate research for current transcript
+ipcMain.handle('trigger-immediate-research', async (_, transcript) => {
+  console.log('Immediate research triggered for transcript:', transcript?.substring(0, 100));
+  
+  try {
+    const { extractTopics } = require('./services/llmProviders');
+    const { fetchResearchSummaries } = require('./services/research/index');
+    
+    // Extract topics from transcript
+    const topicData = await extractTopics(transcript);
+    const allTopics = [...topicData.topics, ...topicData.terms.slice(0, 1)];
+    
+    // Filter out invalid topics
+    const validTopics = allTopics.filter(topic => 
+      topic && 
+      typeof topic === 'string' && 
+      topic.length > 2 && 
+      !topic.includes('BLANK_AUDIO') && 
+      !topic.includes('NULL') && 
+      !topic.includes('UNDEFINED')
+    );
+    
+    if (validTopics.length === 0) {
+      console.log('No valid topics to research');
+      return { success: false, error: 'No valid topics provided' };
+    }
+    
+    // Fetch research summaries
+    const summaries = await fetchResearchSummaries(
+      validTopics,
+      transcript || '',
+      [] // No previous research context for manual triggers
+    );
+    
+    console.log(`Research completed for ${validTopics.length} topics, found ${summaries.length} summaries`);
+    
+    // Emit research-completed event to renderer
+    if (summaries.length > 0) {
+      mainWindow.webContents.send('research-completed', {
+        summaries: summaries,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Add to session if available
+      if (currentSession) {
+        currentSession.research.push({
+          summaries: summaries,
+          timestamp: new Date().toISOString(),
+          triggeredManually: true
+        });
+      }
+    }
+    
+    return { success: true, summariesCount: summaries.length };
+  } catch (error) {
+    console.error('Error triggering research:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC: Trigger research for specific topics (legacy handler)
 ipcMain.handle('trigger-research', async (_, data) => {
   console.log('Manual research triggered for topics:', data.topics);
   
@@ -1044,6 +1156,57 @@ ipcMain.handle('restore-template-version', async (_, templateId, version) => {
     return { success: true, restoredData: result };
   } catch (error) {
     console.error('Error restoring template version:', error);
+    return { error: error.message };
+  }
+});
+
+// Real-time Analysis IPC Handlers
+ipcMain.handle('get-realtime-data', async () => {
+  try {
+    const data = processor.getRealtimeData();
+    return { success: true, data };
+  } catch (error) {
+    console.error('Error getting real-time data:', error);
+    return { error: error.message };
+  }
+});
+
+ipcMain.handle('get-executive-summary', async () => {
+  try {
+    const summary = processor.getExecutiveSummary();
+    return { success: true, summary };
+  } catch (error) {
+    console.error('Error getting executive summary:', error);
+    return { error: error.message };
+  }
+});
+
+ipcMain.handle('get-current-slides', async () => {
+  try {
+    const slides = processor.getCurrentSlides();
+    return { success: true, slides };
+  } catch (error) {
+    console.error('Error getting current slides:', error);
+    return { error: error.message };
+  }
+});
+
+ipcMain.handle('get-knowledge-graph', async (_, options = {}) => {
+  try {
+    const graphData = processor.getKnowledgeGraph(options);
+    return { success: true, graphData };
+  } catch (error) {
+    console.error('Error getting knowledge graph:', error);
+    return { error: error.message };
+  }
+});
+
+ipcMain.handle('get-recent-insights', async (_, limit = 10) => {
+  try {
+    const insights = processor.realtimeAnalyzer.getRecentInsights(limit);
+    return { success: true, insights };
+  } catch (error) {
+    console.error('Error getting recent insights:', error);
     return { error: error.message };
   }
 });

@@ -260,6 +260,13 @@ function App() {
   const [editedReportContent, setEditedReportContent] = useState('');
   const [savingReport, setSavingReport] = useState(false);
   
+  // Real-time insights state
+  const [realtimeInsights, setRealtimeInsights] = useState([]);
+  const [executiveSummary, setExecutiveSummary] = useState('');
+  const [currentSlides, setCurrentSlides] = useState([]);
+  const [knowledgeGraph, setKnowledgeGraph] = useState(null);
+  const [showInsightsPanel, setShowInsightsPanel] = useState(true);
+  
   // Ref for auto-scrolling transcript
   const transcriptRef = useRef(null);
   
@@ -425,6 +432,27 @@ function App() {
       ipcRenderer.on('chunk-processed', chunkHandler);
       ipcRenderer.on('processor-error', errorHandler);
       
+      // Real-time event handlers
+      ipcRenderer.on('realtime-insight', (_, insight) => {
+        if (!isMounted) return;
+        setRealtimeInsights(prev => [...prev.slice(-9), insight]); // Keep last 10
+      });
+
+      ipcRenderer.on('executive-summary-updated', (_, summary) => {
+        if (!isMounted) return;
+        setExecutiveSummary(summary);
+      });
+
+      ipcRenderer.on('slides-generated', (_, slides) => {
+        if (!isMounted) return;
+        setCurrentSlides(slides);
+      });
+
+      ipcRenderer.on('knowledge-graph-updated', (_, graphData) => {
+        if (!isMounted) return;
+        setKnowledgeGraph(graphData);
+      });
+      
       // Check Ollama status after handlers are registered
       setTimeout(() => {
         if (isMounted) {
@@ -448,6 +476,10 @@ function App() {
         ipcRenderer.removeListener('ollama-status', ollamaHandler);
         ipcRenderer.removeListener('chunk-processed', chunkHandler);
         ipcRenderer.removeListener('processor-error', errorHandler);
+        ipcRenderer.removeAllListeners('realtime-insight');
+        ipcRenderer.removeAllListeners('executive-summary-updated');
+        ipcRenderer.removeAllListeners('slides-generated');
+        ipcRenderer.removeAllListeners('knowledge-graph-updated');
       } catch (error) {
         console.error('Error during IPC cleanup:', error);
       }
@@ -636,6 +668,63 @@ function App() {
     setMeetingNotes(null);
   };
 
+  // Helper functions for insight styling
+  const getInsightBackgroundColor = (type) => {
+    const colors = {
+      contradiction: 'rgba(239, 68, 68, 0.1)',
+      jargon: 'rgba(59, 130, 246, 0.1)',
+      suggestion: 'rgba(16, 185, 129, 0.1)',
+      insight: 'rgba(99, 102, 241, 0.1)',
+      example: 'rgba(139, 92, 246, 0.1)',
+      strategic: 'rgba(245, 158, 11, 0.1)',
+      perspective: 'rgba(236, 72, 153, 0.1)',
+      question: 'rgba(6, 182, 212, 0.1)'
+    };
+    return colors[type] || 'rgba(148, 163, 184, 0.1)';
+  };
+
+  const getInsightBorderColor = (type) => {
+    const colors = {
+      contradiction: 'rgba(239, 68, 68, 0.3)',
+      jargon: 'rgba(59, 130, 246, 0.3)',
+      suggestion: 'rgba(16, 185, 129, 0.3)',
+      insight: 'rgba(99, 102, 241, 0.3)',
+      example: 'rgba(139, 92, 246, 0.3)',
+      strategic: 'rgba(245, 158, 11, 0.3)',
+      perspective: 'rgba(236, 72, 153, 0.3)',
+      question: 'rgba(6, 182, 212, 0.3)'
+    };
+    return colors[type] || 'rgba(148, 163, 184, 0.3)';
+  };
+
+  const getInsightTextColor = (type) => {
+    const colors = {
+      contradiction: '#ef4444',
+      jargon: '#3b82f6',
+      suggestion: '#10b981',
+      insight: '#6366f1',
+      example: '#8b5cf6',
+      strategic: '#f59e0b',
+      perspective: '#ec4899',
+      question: '#06b6d4'
+    };
+    return colors[type] || '#94a3b8';
+  };
+
+  const getInsightIcon = (type) => {
+    const icons = {
+      contradiction: '⚠️',
+      jargon: '📖',
+      suggestion: '💡',
+      insight: '🧠',
+      example: '📋',
+      strategic: '🎯',
+      perspective: '👥',
+      question: '❓'
+    };
+    return icons[type] || '💭';
+  };
+
   // Settings functions
   const loadSettings = async () => {
     try {
@@ -760,6 +849,45 @@ function App() {
     } catch (error) {
       console.error('Failed to generate report:', error);
       setSnackbar({ open: true, message: 'Failed to generate report', severity: 'error' });
+    }
+  };
+
+  const triggerResearchForCurrentTranscript = async () => {
+    if (!transcript || transcript.length < 50) return;
+    
+    try {
+      setSnackbar({ open: true, message: 'Researching current transcript...', severity: 'info' });
+      
+      // Extract topics from current transcript
+      const result = await ipcRenderer.invoke('trigger-immediate-research', transcript);
+      if (result.success) {
+        setSnackbar({ open: true, message: 'Research completed!', severity: 'success' });
+      } else {
+        setSnackbar({ open: true, message: 'Research failed', severity: 'error' });
+      }
+    } catch (error) {
+      console.error('Failed to trigger research:', error);
+      setSnackbar({ open: true, message: 'Research failed', severity: 'error' });
+    }
+  };
+
+  const generateQuickReport = async () => {
+    if (!transcript || transcript.length < 50) return;
+    
+    try {
+      setSnackbar({ open: true, message: 'Generating quick report...', severity: 'info' });
+      
+      // Generate meeting notes without template selection
+      const result = await ipcRenderer.invoke('generate-meeting-notes', transcript);
+      if (result.success) {
+        setMeetingNotes(result.notes);
+        setSnackbar({ open: true, message: 'Quick report generated!', severity: 'success' });
+      } else {
+        setSnackbar({ open: true, message: 'Report generation failed', severity: 'error' });
+      }
+    } catch (error) {
+      console.error('Failed to generate quick report:', error);
+      setSnackbar({ open: true, message: 'Report generation failed', severity: 'error' });
     }
   };
 
@@ -1500,7 +1628,31 @@ function App() {
               <Button 
                 variant="outlined" 
                 size="small"
-                onClick={() => setShowTemplateSelection(true)}
+                onClick={triggerResearchForCurrentTranscript}
+                disabled={!transcript || transcript.length < 50}
+                sx={{ 
+                  flex: 1,
+                  fontSize: '12px',
+                  py: 0.75,
+                  borderColor: 'secondary.main',
+                  color: 'secondary.light',
+                  '&:hover': { 
+                    bgcolor: 'rgba(6, 182, 212, 0.1)',
+                    borderColor: 'secondary.light'
+                  },
+                  '&:disabled': {
+                    borderColor: 'rgba(148, 163, 184, 0.3)',
+                    color: 'text.disabled'
+                  }
+                }}
+              >
+                🔍 Research Now
+              </Button>
+              <Button 
+                variant="outlined" 
+                size="small"
+                onClick={generateQuickReport}
+                disabled={!transcript || transcript.length < 50}
                 sx={{ 
                   flex: 1,
                   fontSize: '12px',
@@ -1510,28 +1662,14 @@ function App() {
                   '&:hover': { 
                     bgcolor: 'rgba(16, 185, 129, 0.1)',
                     borderColor: 'success.light'
+                  },
+                  '&:disabled': {
+                    borderColor: 'rgba(148, 163, 184, 0.3)',
+                    color: 'text.disabled'
                   }
                 }}
               >
-                📝 Generate Report
-              </Button>
-              <Button 
-                variant="outlined" 
-                size="small"
-                onClick={() => ipcRenderer.send('test-topic-extraction', 'This is a test about artificial intelligence and machine learning.')}
-                sx={{ 
-                  flex: 1,
-                  fontSize: '12px',
-                  py: 0.75,
-                  borderColor: 'primary.main',
-                  color: 'primary.light',
-                  '&:hover': { 
-                    bgcolor: 'rgba(99, 102, 241, 0.1)',
-                    borderColor: 'primary.light'
-                  }
-                }}
-              >
-                🧪 Test Topics
+                📝 Quick Report
               </Button>
             </Box>
 
@@ -1772,65 +1910,219 @@ function App() {
             p: 3,
             gap: 2
           }}>
-            {/* Research Insights Section */}
+            {/* Real-time Insights Section */}
             <Box sx={{ flex: 1, minHeight: 0 }}>
-              <Typography variant="h6" sx={{ mb: 2, fontWeight: 600, fontSize: '16px' }}>
-                🔬 Research Insights
-              </Typography>
-              
-              <Box sx={{ height: '100%', overflow: 'auto' }}>
-                {research.length === 0 ? (
-                  <Box sx={{ 
-                    textAlign: 'center', 
-                    py: 3,
-                    border: '2px dashed rgba(148, 163, 184, 0.2)',
-                    borderRadius: 2,
-                    bgcolor: 'rgba(148, 163, 184, 0.05)'
-                  }}>
-                    <Typography color="text.secondary" sx={{ mb: 1, fontSize: '14px' }}>
-                      🔍 Research insights will appear here
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ fontSize: '12px' }}>
-                      Click "Research" on any topic
-                    </Typography>
-                  </Box>
-                ) : (
-                  <Stack spacing={2}>
-                    {research.slice(-3).map((item, index) => (
-                      <Box 
-                        key={index}
-                        sx={{ 
-                          p: 2, 
-                          bgcolor: 'rgba(6, 182, 212, 0.05)', 
-                          borderRadius: 2,
-                          border: '1px solid rgba(6, 182, 212, 0.1)',
-                        }}
-                      >
-                        <Typography variant="body2" sx={{ 
-                          fontWeight: 600, 
-                          mb: 1, 
-                          color: 'secondary.light',
-                          fontSize: '14px'
-                        }}>
-                          🔍 {item.topic || 'Research'}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary" sx={{ fontSize: '12px' }}>
-                          {item.summary || (item.sources && item.sources[0]?.summary) || 'Research insight available'}
-                        </Typography>
-                      </Box>
-                    ))}
-                  </Stack>
-                )}
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '16px' }}>
+                  🧠 Live Insights
+                </Typography>
+                <IconButton 
+                  size="small" 
+                  onClick={() => setShowInsightsPanel(!showInsightsPanel)}
+                  sx={{ color: 'text.secondary' }}
+                >
+                  {showInsightsPanel ? '👁️' : '👁️‍🗨️'}
+                </IconButton>
               </Box>
+              
+              {showInsightsPanel && (
+                <Box sx={{ height: '100%', overflow: 'auto' }}>
+                  {realtimeInsights.length === 0 && research.length === 0 ? (
+                    <Box sx={{ 
+                      textAlign: 'center', 
+                      py: 3,
+                      border: '2px dashed rgba(148, 163, 184, 0.2)',
+                      borderRadius: 2,
+                      bgcolor: 'rgba(148, 163, 184, 0.05)'
+                    }}>
+                      <Typography color="text.secondary" sx={{ mb: 1, fontSize: '14px' }}>
+                        🔍 Real-time insights will appear here
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ fontSize: '12px' }}>
+                        AI is analyzing your conversation...
+                      </Typography>
+                    </Box>
+                  ) : (
+                    <Stack spacing={1.5}>
+                      {/* Real-time insights */}
+                      {realtimeInsights.slice(-5).map((insight, index) => (
+                        <Card 
+                          key={`insight-${insight.timestamp}-${index}`}
+                          sx={{ 
+                            p: 1.5, 
+                            bgcolor: getInsightBackgroundColor(insight.type),
+                            border: `1px solid ${getInsightBorderColor(insight.type)}`,
+                            borderRadius: 2,
+                            opacity: 0.95,
+                            transition: 'all 0.3s ease-in-out',
+                            '&:hover': { opacity: 1, transform: 'translateY(-1px)' }
+                          }}
+                        >
+                          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                            <Typography variant="caption" sx={{ 
+                              fontSize: '10px',
+                              fontWeight: 600,
+                              color: getInsightTextColor(insight.type),
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.5px'
+                            }}>
+                              {getInsightIcon(insight.type)} {insight.type}
+                            </Typography>
+                            <Box sx={{ flex: 1 }} />
+                            <Chip 
+                              label={`${Math.round(insight.confidence * 100)}%`}
+                              size="small"
+                              sx={{ 
+                                height: '16px',
+                                fontSize: '9px',
+                                bgcolor: 'rgba(255,255,255,0.2)',
+                                color: 'text.primary'
+                              }}
+                            />
+                          </Box>
+                          <Typography variant="body2" sx={{ 
+                            fontSize: '12px',
+                            lineHeight: 1.4,
+                            color: 'text.primary'
+                          }}>
+                            {insight.content}
+                          </Typography>
+                          {insight.action && (
+                            <Typography variant="caption" sx={{ 
+                              fontSize: '11px',
+                              color: 'text.secondary',
+                              fontStyle: 'italic',
+                              mt: 0.5,
+                              display: 'block'
+                            }}>
+                              💡 {insight.action}
+                            </Typography>
+                          )}
+                        </Card>
+                      ))}
+                      
+                      {/* Traditional research insights */}
+                      {research.slice(-2).map((item, index) => (
+                        <Card 
+                          key={`research-${index}`}
+                          sx={{ 
+                            p: 1.5, 
+                            bgcolor: 'rgba(6, 182, 212, 0.05)', 
+                            borderRadius: 2,
+                            border: '1px solid rgba(6, 182, 212, 0.1)',
+                          }}
+                        >
+                          <Typography variant="body2" sx={{ 
+                            fontWeight: 600, 
+                            mb: 0.5, 
+                            color: 'secondary.light',
+                            fontSize: '12px'
+                          }}>
+                            🔍 {item.topic || 'Research'}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" sx={{ fontSize: '11px' }}>
+                            {item.summary || (item.sources && item.sources[0]?.summary) || 'Research insight available'}
+                          </Typography>
+                        </Card>
+                      ))}
+                    </Stack>
+                  )}
+                </Box>
+              )}
             </Box>
 
-            {/* Quick Notes Section */}
+            {/* Quick Notes & Summary Section */}
             <Box sx={{ height: '300px', display: 'flex', flexDirection: 'column' }}>
-              <Typography variant="h6" sx={{ mb: 2, fontWeight: 600, fontSize: '16px' }}>
-                📋 Quick Notes
-              </Typography>
+              <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+                <Chip 
+                  label="📋 Notes" 
+                  size="small" 
+                  onClick={() => setActiveTab(0)}
+                  variant={activeTab === 0 ? "filled" : "outlined"}
+                  sx={{ fontSize: '12px' }}
+                />
+                <Chip 
+                  label="📄 Summary" 
+                  size="small" 
+                  onClick={() => setActiveTab(1)}
+                  variant={activeTab === 1 ? "filled" : "outlined"}
+                  sx={{ fontSize: '12px' }}
+                />
+                <Chip 
+                  label="📊 Slides" 
+                  size="small" 
+                  onClick={() => setActiveTab(2)}
+                  variant={activeTab === 2 ? "filled" : "outlined"}
+                  sx={{ fontSize: '12px' }}
+                />
+              </Box>
               
-              {renderMeetingNotes()}
+              <Box sx={{ flex: 1, overflow: 'auto' }}>
+                {activeTab === 0 && renderMeetingNotes()}
+                
+                {activeTab === 1 && (
+                  <Box sx={{ 
+                    p: 2,
+                    border: '1px solid rgba(148, 163, 184, 0.1)',
+                    borderRadius: 2,
+                    bgcolor: 'rgba(248, 250, 252, 0.5)',
+                    height: '100%'
+                  }}>
+                    {executiveSummary ? (
+                      <Typography variant="body2" sx={{ 
+                        fontSize: '12px',
+                        lineHeight: 1.4,
+                        color: 'text.primary'
+                      }}>
+                        {executiveSummary}
+                      </Typography>
+                    ) : (
+                      <Typography color="text.secondary" sx={{ fontSize: '12px', fontStyle: 'italic' }}>
+                        Executive summary will appear as conversation progresses...
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+                
+                {activeTab === 2 && (
+                  <Box sx={{ 
+                    height: '100%',
+                    overflow: 'auto'
+                  }}>
+                    {currentSlides.length > 0 ? (
+                      <Stack spacing={1}>
+                        {currentSlides.map((slide, index) => (
+                          <Card key={index} sx={{ p: 1.5, bgcolor: 'rgba(99, 102, 241, 0.05)' }}>
+                            <Typography variant="subtitle2" sx={{ 
+                              fontSize: '13px', 
+                              fontWeight: 600, 
+                              mb: 1,
+                              color: 'primary.main'
+                            }}>
+                              {slide.title}
+                            </Typography>
+                            {slide.bullets.map((bullet, bulletIndex) => (
+                              <Typography key={bulletIndex} variant="body2" sx={{ 
+                                fontSize: '11px',
+                                lineHeight: 1.3,
+                                color: 'text.secondary',
+                                ml: 1,
+                                mb: 0.5
+                              }}>
+                                • {bullet}
+                              </Typography>
+                            ))}
+                          </Card>
+                        ))}
+                      </Stack>
+                    ) : (
+                      <Typography color="text.secondary" sx={{ fontSize: '12px', fontStyle: 'italic' }}>
+                        Slide points will be generated every 5 minutes...
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+              </Box>
             </Box>
 
             {/* Recent Section */}

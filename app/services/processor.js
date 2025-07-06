@@ -3,6 +3,8 @@ const EventEmitter = require('events');
 const { extractTopics } = require('./llmProviders');
 const { fetchResearchSummaries } = require('./research/index');
 const { loadConfig } = require('../config');
+const RealtimeAnalyzer = require('./realtimeAnalyzer');
+const KnowledgeGraphBuilder = require('./knowledgeGraphBuilder');
 
 class ConversationProcessor extends EventEmitter {
   constructor() {
@@ -19,6 +21,46 @@ class ConversationProcessor extends EventEmitter {
     this.minWordsPerChunk = this.config.thresholds.min_words_per_chunk || 5; // Lowered from 25 to 5
     this.maxBufferWords = 100; // Process if buffer gets too large
     this.idleTimeout = 3000; // Process after 3 seconds of silence (reduced from 5)
+    
+    // Initialize real-time analysis components
+    this.realtimeAnalyzer = new RealtimeAnalyzer({
+      minWordsForAnalysis: 30, // Slightly higher for real-time to avoid noise
+      maxInsightsPerMinute: 8,
+      confidenceThreshold: 0.75
+    });
+    
+    this.knowledgeGraph = new KnowledgeGraphBuilder();
+    
+    // Set up real-time event handlers
+    this.setupRealtimeHandlers();
+  }
+
+  setupRealtimeHandlers() {
+    // Forward real-time insights to main processor events
+    this.realtimeAnalyzer.on('realtime-insight', (insight) => {
+      this.emit('realtime-insight', insight);
+    });
+
+    this.realtimeAnalyzer.on('executive-summary-updated', (summary) => {
+      this.emit('executive-summary-updated', summary);
+    });
+
+    this.realtimeAnalyzer.on('slides-generated', (slides) => {
+      this.emit('slides-generated', slides);
+    });
+
+    this.realtimeAnalyzer.on('knowledge-graph-updated', (graphData) => {
+      this.emit('knowledge-graph-updated', graphData);
+    });
+
+    // Forward knowledge graph events
+    this.knowledgeGraph.on('topic-added', (data) => {
+      this.emit('topic-added', data);
+    });
+
+    this.knowledgeGraph.on('connection-added', (data) => {
+      this.emit('connection-added', data);
+    });
   }
 
   // Add new transcript text to the buffer
@@ -29,6 +71,9 @@ class ConversationProcessor extends EventEmitter {
     this.transcriptBuffer += ' ' + text;
     this.wordCount += text.split(/\s+/).filter(word => word.length > 0).length;
     console.log('📊 Processor: Buffer now has', this.wordCount, 'words, min required:', this.minWordsPerChunk);
+    
+    // NEW: Feed to real-time analyzer for immediate insights
+    this.realtimeAnalyzer.processFragment(text);
     
     // Check if we should process
     if (this.shouldProcess()) {
@@ -116,6 +161,13 @@ class ConversationProcessor extends EventEmitter {
       
       if (topicData.topics.length > 0 || topicData.questions.length > 0 || topicData.terms.length > 0) {
         console.log('✨ Processor: Topics found! Emitting topics event');
+        
+        // NEW: Add topics to knowledge graph
+        this.knowledgeGraph.addTopicsFromText(
+          [...topicData.topics, ...topicData.terms],
+          [] // Will be enhanced with relationship detection later
+        );
+        
         // Emit topics event
         this.emit('topics', {
           topics: topicData.topics,
@@ -195,6 +247,10 @@ class ConversationProcessor extends EventEmitter {
     this.isProcessing = false;
     this.previousResearch = []; // Clear research context
     
+    // Clear real-time components
+    this.realtimeAnalyzer.clear();
+    this.knowledgeGraph.clear();
+    
     if (this.idleTimer) {
       clearTimeout(this.idleTimer);
       this.idleTimer = null;
@@ -207,8 +263,46 @@ class ConversationProcessor extends EventEmitter {
       bufferWordCount: this.wordCount,
       queueLength: this.processingQueue.length,
       isProcessing: this.isProcessing,
-      lastProcessedTime: this.lastProcessedTime
+      lastProcessedTime: this.lastProcessedTime,
+      realtimeInsights: this.realtimeAnalyzer.getRecentInsights(5),
+      knowledgeGraphStats: this.knowledgeGraph.getGraphStats()
     };
+  }
+
+  // Get real-time data for UI
+  getRealtimeData() {
+    return {
+      insights: this.realtimeAnalyzer.getRecentInsights(10),
+      executiveSummary: this.realtimeAnalyzer.executiveSummary,
+      slides: this.realtimeAnalyzer.slidePoints,
+      knowledgeGraph: this.knowledgeGraph.getGraphData({
+        maxNodes: 50,
+        minWeight: 1
+      })
+    };
+  }
+
+  // Get executive summary
+  getExecutiveSummary() {
+    return this.realtimeAnalyzer.executiveSummary;
+  }
+
+  // Get current slides
+  getCurrentSlides() {
+    return this.realtimeAnalyzer.slidePoints;
+  }
+
+  // Get knowledge graph data
+  getKnowledgeGraph(options = {}) {
+    return this.knowledgeGraph.getGraphData(options);
+  }
+
+  // Destroy processor and clean up
+  destroy() {
+    this.clear();
+    this.realtimeAnalyzer.destroy();
+    this.knowledgeGraph.destroy();
+    this.removeAllListeners();
   }
 }
 

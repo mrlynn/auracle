@@ -73,6 +73,18 @@ function loadConfig() {
         theme: 'dark',
         autoExportNotes: false,
         showDebugInfo: false
+      },
+      realtime: {
+        enabled: true,
+        insightTypes: ['contradiction', 'jargon', 'suggestion', 'strategic'],
+        maxInsightsPerMinute: 8,
+        executiveSummaryInterval: 30000, // 30 seconds
+        slideGenerationInterval: 300000, // 5 minutes
+        confidenceThreshold: 0.75,
+        minWordsForAnalysis: 30,
+        enableKnowledgeGraph: true,
+        enableExecutiveSummary: true,
+        enableSlideGeneration: true
       }
     };
     fs.writeFileSync(configFile, JSON.stringify(defaultConfig, null, 2));

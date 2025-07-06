@@ -454,7 +454,30 @@ Maintain objectivity and accuracy. Use exact quotes for critical testimony.`,
       throw new Error('Cannot modify default templates');
     }
     
-    return await updateTemplate(templateId, updates);
+    // Save current version before updating
+    if (template) {
+      const { saveTemplateVersion } = require('./mongoStorage');
+      try {
+        await saveTemplateVersion(templateId, template, 'pre_update');
+      } catch (error) {
+        console.warn('Failed to save template version:', error);
+      }
+    }
+    
+    const result = await updateTemplate(templateId, updates);
+    
+    // Save new version after updating
+    if (result) {
+      const { saveTemplateVersion } = require('./mongoStorage');
+      try {
+        const updatedTemplate = await getTemplateById(templateId);
+        await saveTemplateVersion(templateId, updatedTemplate, 'updated');
+      } catch (error) {
+        console.warn('Failed to save updated template version:', error);
+      }
+    }
+    
+    return result;
   }
 
   async deleteCustomTemplate(templateId) {

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Auracle Loading...</title>
+  <link rel="stylesheet" href="splash.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="loading-container">
+    <!-- Auracle Logo/Icon Area -->
+    <div class="app-icon">
+      <div class="pixel-logo">A</div>
+    </div>
+    
+    <!-- Animated Sprite -->
+    <div class="pixel-sprite"></div>
+    
+    <!-- Loading Text with Typing Animation -->
+    <div class="loading-text-container">
+      <div class="loading-text" id="loadingText">Initializing Auracle...</div>
+      <div class="loading-dots">
+        <span class="dot">.</span>
+        <span class="dot">.</span>
+        <span class="dot">.</span>
+      </div>
+    </div>
+    
+    <!-- Progress Bar -->
+    <div class="progress-container">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+    
+    <!-- Status Messages -->
+    <div class="status-message" id="statusMessage">Starting AI Research Companion</div>
+  </div>
+
+  <!-- 8-bit Audio (Optional) -->
+  <audio id="loadingSound" preload="auto" loop>
+    <!-- You can add an 8-bit loading sound here -->
+    <!-- <source src="assets/loading-sound.mp3" type="audio/mpeg"> -->
+  </audio>
+
+  <script src="splash.js"></script>
+</body>
+</html>

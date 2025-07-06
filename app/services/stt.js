@@ -214,12 +214,22 @@ function startTranscription(onTranscript) {
   });
   
   proc.on('close', (code) => {
-    // Commit any remaining pending text
+    // Commit any remaining pending text and cleanup timers
     if (commitTimer) {
       clearTimeout(commitTimer);
+      commitTimer = null;
       commitPendingText();
     }
     onTranscript({ type: 'system', text: `[whisper.cpp exited with code ${code}]` });
+  });
+  
+  proc.on('error', (error) => {
+    // Critical: cleanup timers on process error to prevent leaks
+    if (commitTimer) {
+      clearTimeout(commitTimer);
+      commitTimer = null;
+    }
+    onTranscript({ type: 'error', text: '[whisper.cpp process error] ' + error.message });
   });
   
   return proc;

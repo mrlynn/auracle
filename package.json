@@ -1,17 +1,49 @@
 {
   "name": "auracle",
+  "productName": "Auracle",
   "version": "1.0.0",
+  "description": "AI-powered real-time conversation research companion that transcribes speech, extracts topics, and provides intelligent research insights.",
   "main": "app/main.js",
+  "homepage": "https://auracle.app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/auracle.git"
+  },
+  "author": {
+    "name": "Auracle Team",
+    "email": "hello@auracle.app",
+    "url": "https://auracle.app"
+  },
+  "license": "MIT",
+  "keywords": [
+    "ai",
+    "speech-recognition",
+    "research",
+    "conversation",
+    "transcription",
+    "productivity",
+    "whisper",
+    "ollama",
+    "real-time"
+  ],
+  "category": "Productivity",
   "scripts": {
     "start": "npm run build && electron .",
     "dev": "concurrently \"webpack --watch\" \"wait-on dist/bundle.js && electron .\"",
-    "build": "webpack",
-    "package": "electron-builder"
+    "build": "webpack --mode=production",
+    "build:dev": "webpack --mode=development",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:linux": "npm run build && electron-builder --linux",
+    "release": "npm run build && electron-builder --publish=always",
+    "release:mac": "npm run build && electron-builder --mac --publish=always",
+    "release:win": "npm run build && electron-builder --win --publish=always",
+    "release:linux": "npm run build && electron-builder --linux --publish=always",
+    "package": "electron-builder",
+    "postinstall": "electron-builder install-app-deps"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
   "dependencies": {
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
@@ -31,9 +63,19 @@
     "concurrently": "^9.2.0",
     "cross-env": "^7.0.3",
     "electron-builder": "^26.0.12",
+    "electron-notarize": "^1.2.2",
     "html-webpack-plugin": "^5.6.3",
     "wait-on": "^8.0.3",
     "webpack": "^5.99.9",
     "webpack-cli": "^6.0.1"
-  }
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "os": [
+    "darwin",
+    "win32",
+    "linux"
+  ]
 }

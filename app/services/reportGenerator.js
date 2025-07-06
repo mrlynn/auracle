@@ -1,6 +1,6 @@
 // Report Generator Service - Handles report generation using OpenAI and template processing
 const https = require('https');
-const { createReport, getReports, getReportById, getReportsBySession } = require('./mongoStorage');
+const { createReport, getReports, getReportById, getReportsBySession, updateReport, saveExportedReport } = require('./mongoStorage');
 const { getTemplateForUse, substituteVariables, validateVariables } = require('./templateManager');
 const { trackRequest } = require('./usageTracker');
 
@@ -290,6 +290,21 @@ Format your response using clean Markdown with proper headers, lists, and emphas
     }
   }
 
+  async updateReport(reportId, updates) {
+    try {
+      const result = await updateReport(reportId, updates);
+      return {
+        success: true,
+        updated: result
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
   // Export functions
   async exportReport(reportId, format = 'markdown') {
     try {
@@ -323,11 +338,37 @@ Format your response using clean Markdown with proper headers, lists, and emphas
           throw new Error('Unsupported export format');
       }
 
+      // Save export record to MongoDB
+      try {
+        await saveExportedReport({
+          reportId: reportId,
+          format: format,
+          fileName: filename,
+          filePath: null, // Will be set by main process when saved to disk
+          fileSize: Buffer.byteLength(exportContent, 'utf8'),
+          originalReport: {
+            templateName: report.templateName,
+            generatedAt: report.generatedAt,
+            sessionId: report.sessionId
+          },
+          exportSettings: {
+            format: format,
+            timestamp: timestamp
+          }
+        });
+        console.log(`Export record saved for report ${reportId}`);
+      } catch (error) {
+        console.error('Failed to save export record:', error);
+        // Don't fail the export if MongoDB save fails
+      }
+
       return {
         success: true,
         content: exportContent,
         filename: filename,
-        mimeType: this.getMimeType(format)
+        mimeType: this.getMimeType(format),
+        reportId: reportId,
+        fileSize: Buffer.byteLength(exportContent, 'utf8')
       };
 
     } catch (error) {
@@ -423,5 +464,6 @@ module.exports = {
   getReport: (reportId) => reportGenerator.getReport(reportId),
   getSessionReports: (sessionId) => reportGenerator.getSessionReports(sessionId),
   getUserReports: (filter, options) => reportGenerator.getUserReports(filter, options),
+  updateReport: (reportId, updates) => reportGenerator.updateReport(reportId, updates),
   exportReport: (reportId, format) => reportGenerator.exportReport(reportId, format)
 };

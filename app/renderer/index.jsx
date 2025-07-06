@@ -10,6 +10,10 @@ import {
 } from '@mui/material';
 import { styled, createTheme, ThemeProvider } from '@mui/material/styles';
 
+// Import custom components
+import EnhancedResearchCard from './components/research/EnhancedResearchCard.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
+
 const { ipcRenderer } = window.require('electron');
 
 // Professional dark theme
@@ -227,31 +231,71 @@ function App() {
   const [showReportDialog, setShowReportDialog] = useState(false);
   const [userReports, setUserReports] = useState([]);
   const [loadingReports, setLoadingReports] = useState(false);
+  
+  // Exported Reports state
+  const [exportedReports, setExportedReports] = useState([]);
+  const [loadingExportedReports, setLoadingExportedReports] = useState(false);
+  const [reportViewMode, setReportViewMode] = useState('generated'); // 'generated' | 'exported' | 'favorites'
+  
+  // Report editing state
+  const [isEditingReport, setIsEditingReport] = useState(false);
+  const [editedReportName, setEditedReportName] = useState('');
+  const [editedReportContent, setEditedReportContent] = useState('');
+  const [savingReport, setSavingReport] = useState(false);
 
   useEffect(() => {
+    let isMounted = true;
     console.log('Setting up IPC listeners...');
     
-    // Transcript updates
+    // Transcript updates with AGGRESSIVE memory management
+    const MAX_TRANSCRIPT_LENGTH = 10000; // 10KB limit - REDUCED for extreme memory pressure
+    const MAX_TRANSCRIPT_LINES = 100; // Max lines - REDUCED
+    
     const transcriptHandler = (_, data) => {
+      if (!isMounted) return; // Prevent updates after unmount
+      
       if (typeof data === 'string') {
         // Legacy format
         setTranscript((prev) => {
-          const newTranscript = prev + (prev ? '\n' : '') + data;
+          // Memory management: truncate if too large
+          let managedPrev = prev;
+          if (prev.length > MAX_TRANSCRIPT_LENGTH) {
+            const lines = prev.split('\n');
+            managedPrev = lines.slice(-Math.floor(MAX_TRANSCRIPT_LINES / 2)).join('\n');
+            console.warn('Transcript truncated due to memory limits');
+          }
+          
+          const newTranscript = managedPrev + (managedPrev ? '\n' : '') + data;
           setWordCount(newTranscript.split(/\s+/).filter(word => word.length > 0).length);
           return newTranscript;
         });
       } else if (data.type === 'final') {
         // Committed text - add permanently
         setTranscript((prev) => {
-          const newTranscript = prev + (prev ? '\n' : '') + data.text;
+          // Memory management: truncate if too large
+          let managedPrev = prev;
+          if (prev.length > MAX_TRANSCRIPT_LENGTH) {
+            const lines = prev.split('\n');
+            managedPrev = lines.slice(-Math.floor(MAX_TRANSCRIPT_LINES / 2)).join('\n');
+            console.warn('Transcript truncated due to memory limits');
+          }
+          
+          const newTranscript = managedPrev + (managedPrev ? '\n' : '') + data.text;
           setWordCount(newTranscript.split(/\s+/).filter(word => word.length > 0).length);
           return newTranscript;
         });
       } else if (data.type === 'interim') {
         // Interim text - show temporarily but don't save
         setTranscript((prev) => {
+          // Memory management for interim updates
+          let managedPrev = prev;
+          if (prev.length > MAX_TRANSCRIPT_LENGTH) {
+            const lines = prev.split('\n');
+            managedPrev = lines.slice(-Math.floor(MAX_TRANSCRIPT_LINES / 2)).join('\n');
+          }
+          
           // Remove any previous interim text and add new interim
-          const lines = prev.split('\n');
+          const lines = managedPrev.split('\n');
           const finalLines = lines.filter(line => !line.startsWith('〉'));
           const newTranscript = finalLines.join('\n') + (finalLines.length > 0 ? '\n' : '') + '〉 ' + data.text;
           return newTranscript;
@@ -265,55 +309,190 @@ function App() {
       }
     };
     
-    // Topics extracted
+    // Topics extracted with deduplication and limits
     const topicsHandler = (_, data) => {
-      setTopics((prev) => [...prev, data]);
+      if (!isMounted) return;
+      setTopics((prev) => {
+        // Add new data and deduplicate by timestamp
+        const newTopics = [...prev, data];
+        const uniqueTopics = newTopics.filter((topic, index, array) => 
+          array.findIndex(t => t.timestamp === topic.timestamp) === index
+        );
+        
+        // Keep only last 10 topic entries - REDUCED for extreme memory pressure
+        const limitedTopics = uniqueTopics.slice(-10);
+        
+        if (limitedTopics.length < uniqueTopics.length) {
+          console.warn(`Topics truncated: ${uniqueTopics.length} -> ${limitedTopics.length}`);
+        }
+        
+        return limitedTopics;
+      });
     };
     
-    // Research completed
+    // Research completed with deduplication and limits
     const researchHandler = (_, data) => {
-      setResearch((prev) => [...prev, ...data.summaries]);
+      if (!isMounted) return;
+      setResearch((prev) => {
+        // Add new summaries and deduplicate by topic
+        const newResearch = [...prev, ...data.summaries];
+        const uniqueResearch = newResearch.filter((research, index, array) => 
+          array.findIndex(r => r.topic === research.topic && r.timestamp === research.timestamp) === index
+        );
+        
+        // Keep only last 5 research items - REDUCED for extreme memory pressure
+        const limitedResearch = uniqueResearch.slice(-5);
+        
+        if (limitedResearch.length < uniqueResearch.length) {
+          console.warn(`Research truncated: ${uniqueResearch.length} -> ${limitedResearch.length}`);
+        }
+        
+        return limitedResearch;
+      });
     };
     
     // Ollama status
     const ollamaHandler = (_, connected) => {
+      if (!isMounted) return;
       console.log('Received ollama-status update:', connected);
       setOllamaConnected(connected);
     };
     
     // Processing status
     const chunkHandler = () => {
+      if (!isMounted) return;
       setProcessingStatus('Processing chunk...');
-      setTimeout(() => setProcessingStatus(null), 1000);
+      setTimeout(() => {
+        if (isMounted) setProcessingStatus(null);
+      }, 1000);
     };
     
     // Error handler
     const errorHandler = (_, error) => {
-      console.error('Error:', error);
+      if (!isMounted) return;
+      console.error('IPC Error:', error);
     };
 
-    // Register all handlers
-    console.log('Registering ollama-status handler...');
-    ipcRenderer.on('transcript-update', transcriptHandler);
-    ipcRenderer.on('topics-extracted', topicsHandler);
-    ipcRenderer.on('research-completed', researchHandler);
-    ipcRenderer.on('ollama-status', ollamaHandler);
-    ipcRenderer.on('chunk-processed', chunkHandler);
-    ipcRenderer.on('processor-error', errorHandler);
-    
-    // Check Ollama status after handlers are registered
-    setTimeout(() => {
-      console.log('Sending check-ollama-status request...');
-      ipcRenderer.send('check-ollama-status');
-    }, 100);
+    // Register all handlers with error handling
+    try {
+      console.log('Registering IPC event handlers...');
+      ipcRenderer.on('transcript-update', transcriptHandler);
+      ipcRenderer.on('topics-extracted', topicsHandler);
+      ipcRenderer.on('research-completed', researchHandler);
+      ipcRenderer.on('ollama-status', ollamaHandler);
+      ipcRenderer.on('chunk-processed', chunkHandler);
+      ipcRenderer.on('processor-error', errorHandler);
+      
+      // Check Ollama status after handlers are registered
+      setTimeout(() => {
+        if (isMounted) {
+          console.log('Sending check-ollama-status request...');
+          ipcRenderer.send('check-ollama-status');
+        }
+      }, 100);
+    } catch (error) {
+      console.error('Failed to set up IPC listeners:', error);
+    }
     
     return () => {
-      ipcRenderer.removeListener('transcript-update', transcriptHandler);
-      ipcRenderer.removeListener('topics-extracted', topicsHandler);
-      ipcRenderer.removeListener('research-completed', researchHandler);
-      ipcRenderer.removeListener('ollama-status', ollamaHandler);
-      ipcRenderer.removeListener('chunk-processed', chunkHandler);
-      ipcRenderer.removeListener('processor-error', errorHandler);
+      isMounted = false;
+      console.log('Cleaning up IPC listeners...');
+      
+      // Remove all listeners - more thorough cleanup
+      try {
+        ipcRenderer.removeListener('transcript-update', transcriptHandler);
+        ipcRenderer.removeListener('topics-extracted', topicsHandler);
+        ipcRenderer.removeListener('research-completed', researchHandler);
+        ipcRenderer.removeListener('ollama-status', ollamaHandler);
+        ipcRenderer.removeListener('chunk-processed', chunkHandler);
+        ipcRenderer.removeListener('processor-error', errorHandler);
+      } catch (error) {
+        console.error('Error during IPC cleanup:', error);
+      }
+    };
+  }, []);
+
+  // Emergency memory recovery system
+  useEffect(() => {
+    let memoryCheckInterval;
+    
+    // Monitor memory usage and perform emergency cleanup if needed
+    const checkMemoryUsage = () => {
+      try {
+        // Check if performance.memory is available (Chromium/Electron)
+        if (window.performance && window.performance.memory) {
+          const memoryInfo = window.performance.memory;
+          const usedMB = memoryInfo.usedJSHeapSize / (1024 * 1024);
+          const limitMB = memoryInfo.jsHeapSizeLimit / (1024 * 1024);
+          
+          console.log(`Memory usage: ${usedMB.toFixed(1)}MB / ${limitMB.toFixed(1)}MB`);
+          
+          // Emergency cleanup if memory usage is too high - MORE AGGRESSIVE
+          if (usedMB > 100 || (usedMB / limitMB) > 0.7) {
+            console.warn('🚨 High memory usage detected, performing emergency cleanup');
+            
+            // Aggressive state cleanup - batch updates to prevent React unmounting
+            React.startTransition(() => {
+              setTopics(prev => prev.slice(-5)); // Even more aggressive
+              setResearch(prev => prev.slice(-3));
+              setTranscript(prev => {
+                const lines = prev.split('\n');
+                return lines.slice(-50).join('\n'); // Keep only last 50 lines
+              });
+              
+              // Clear any pending updates
+              setProcessingStatus(null);
+              setWordCount(0);
+            });
+            
+            // Force garbage collection if available
+            if (window.gc) {
+              window.gc();
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Memory check error:', error);
+      }
+    };
+    
+    // Check every 30 seconds
+    memoryCheckInterval = setInterval(checkMemoryUsage, 30000);
+    
+    return () => {
+      if (memoryCheckInterval) {
+        clearInterval(memoryCheckInterval);
+      }
+    };
+  }, []);
+
+  // Global error boundary for renderer crashes
+  useEffect(() => {
+    const handleError = (error) => {
+      console.error('🚨 Renderer error detected:', error);
+      try {
+        // Send crash report to main process
+        ipcRenderer.send('renderer-error', {
+          message: error.message,
+          stack: error.stack,
+          timestamp: new Date().toISOString()
+        });
+      } catch (e) {
+        console.error('Failed to send error report:', e);
+      }
+    };
+    
+    const handleUnhandledRejection = (event) => {
+      console.error('🚨 Unhandled promise rejection:', event.reason);
+      handleError(new Error(`Unhandled rejection: ${event.reason}`));
+    };
+    
+    window.addEventListener('error', handleError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+    
+    return () => {
+      window.removeEventListener('error', handleError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
     };
   }, []);
 
@@ -334,6 +513,35 @@ function App() {
     // Show template selection if we have sufficient transcript
     if (transcript.length > 50) {
       setShowTemplateSelection(true);
+    }
+  };
+
+  const triggerResearchForTopic = async (topicData) => {
+    if (!topicData || !topicData.topics || topicData.topics.length === 0) {
+      console.warn('No topics available for research');
+      return;
+    }
+
+    console.log('Triggering research for topics:', topicData.topics);
+    
+    try {
+      // Send research request to main process
+      const result = await ipcRenderer.invoke('trigger-research', {
+        topics: topicData.topics,
+        questions: topicData.questions || [],
+        terms: topicData.terms || [],
+        transcript: transcript,
+        timestamp: topicData.timestamp
+      });
+      
+      if (result.success) {
+        console.log('Research triggered successfully');
+        // Research results will be received via the research-completed event
+      } else {
+        console.error('Failed to trigger research:', result.error);
+      }
+    } catch (error) {
+      console.error('Error triggering research:', error);
     }
   };
 
@@ -434,6 +642,7 @@ function App() {
     loadSettings();
     loadMetrics();
     loadUserReports();
+    loadExportedReports();
     setShowSettings(true);
   };
 
@@ -627,6 +836,108 @@ function App() {
     } catch (error) {
       console.error('Failed to load report:', error);
       setSnackbar({ open: true, message: 'Failed to load report', severity: 'error' });
+    }
+  };
+
+  // Exported Reports functions
+  const loadExportedReports = async () => {
+    setLoadingExportedReports(true);
+    try {
+      const result = await ipcRenderer.invoke('get-exported-reports-by-user', 'default-user');
+      if (result.success) {
+        setExportedReports(result.reports);
+      } else {
+        console.error('Failed to load exported reports:', result.error);
+        setSnackbar({ open: true, message: 'Failed to load exported reports', severity: 'error' });
+      }
+    } catch (error) {
+      console.error('Failed to load exported reports:', error);
+      setSnackbar({ open: true, message: 'Failed to load exported reports', severity: 'error' });
+    } finally {
+      setLoadingExportedReports(false);
+    }
+  };
+
+  const loadFavoriteReports = async () => {
+    setLoadingReports(true);
+    try {
+      const result = await ipcRenderer.invoke('get-favorite-reports', 'default-user');
+      if (result.success) {
+        setUserReports(result.reports);
+      } else {
+        console.error('Failed to load favorite reports:', result.error);
+        setSnackbar({ open: true, message: 'Failed to load favorite reports', severity: 'error' });
+      }
+    } catch (error) {
+      console.error('Failed to load favorite reports:', error);
+      setSnackbar({ open: true, message: 'Failed to load favorite reports', severity: 'error' });
+    } finally {
+      setLoadingReports(false);
+    }
+  };
+
+  const deleteExportedReport = async (exportId) => {
+    try {
+      const result = await ipcRenderer.invoke('delete-exported-report', exportId);
+      if (result.success && result.deleted) {
+        setSnackbar({ open: true, message: 'Exported report deleted successfully', severity: 'success' });
+        loadExportedReports(); // Refresh list
+      } else {
+        setSnackbar({ open: true, message: 'Failed to delete exported report', severity: 'error' });
+      }
+    } catch (error) {
+      console.error('Failed to delete exported report:', error);
+      setSnackbar({ open: true, message: 'Failed to delete exported report', severity: 'error' });
+    }
+  };
+
+  // Report editing functions
+  const startEditingReport = () => {
+    if (generatedReport) {
+      setIsEditingReport(true);
+      setEditedReportName(generatedReport.template?.name || '');
+      setEditedReportContent(generatedReport.content);
+    }
+  };
+
+  const cancelEditingReport = () => {
+    setIsEditingReport(false);
+    setEditedReportName('');
+    setEditedReportContent('');
+  };
+
+  const saveReportEdits = async () => {
+    if (!generatedReport) return;
+    
+    setSavingReport(true);
+    try {
+      const updates = {
+        templateName: editedReportName,
+        content: editedReportContent
+      };
+      
+      const result = await ipcRenderer.invoke('update-report', generatedReport.id, updates);
+      if (result.success) {
+        setSnackbar({ open: true, message: 'Report updated successfully', severity: 'success' });
+        
+        // Update the local state
+        setGeneratedReport(prev => ({
+          ...prev,
+          template: { ...prev.template, name: editedReportName },
+          content: editedReportContent
+        }));
+        
+        // Refresh reports list
+        loadUserReports();
+        setIsEditingReport(false);
+      } else {
+        setSnackbar({ open: true, message: 'Failed to update report', severity: 'error' });
+      }
+    } catch (error) {
+      console.error('Failed to save report edits:', error);
+      setSnackbar({ open: true, message: 'Failed to update report', severity: 'error' });
+    } finally {
+      setSavingReport(false);
     }
   };
 
@@ -986,108 +1297,139 @@ function App() {
     
     return (
       <Stack spacing={2}>
-        {research.map((summary, index) => (
-          <Fade in={true} key={index} style={{ transitionDelay: `${index * 150}ms` }}>
-            <Box sx={{ 
-              p: 2, 
-              bgcolor: 'rgba(6, 182, 212, 0.05)', 
-              borderRadius: 2,
-              border: '1px solid rgba(6, 182, 212, 0.1)',
-              transition: 'all 0.2s ease',
-              '&:hover': {
-                bgcolor: 'rgba(6, 182, 212, 0.08)',
-                border: '1px solid rgba(6, 182, 212, 0.2)',
-                transform: 'translateY(-1px)',
-              }
-            }}>
-              <Typography variant="subtitle2" sx={{ 
-                fontWeight: 700, 
-                mb: 2, 
-                color: 'secondary.light',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1
-              }}>
-                🎯 {summary.topic}
-              </Typography>
-              
-              <Stack spacing={1.5}>
-                {summary.sources.map((source, i) => (
-                  <Box 
-                    key={i} 
-                    sx={{ 
-                      p: 2, 
-                      bgcolor: 'rgba(15, 23, 42, 0.3)', 
-                      borderRadius: 2,
-                      border: '1px solid rgba(148, 163, 184, 0.1)',
-                      transition: 'all 0.2s ease',
-                      '&:hover': {
-                        bgcolor: 'rgba(15, 23, 42, 0.5)',
-                        border: '1px solid rgba(148, 163, 184, 0.2)',
-                      }
-                    }}
-                  >
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary', flex: 1, mr: 1 }}>
-                        {source.title}
-                      </Typography>
-                      <Chip 
-                        label={source.source} 
-                        size="small" 
-                        sx={{
-                          background: source.source === 'Wikipedia' 
-                            ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
-                            : source.source === 'DuckDuckGo'
-                            ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
-                            : 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)',
-                          color: 'white',
-                          fontWeight: 500,
-                          fontSize: '11px'
+        {research.map((item, index) => {
+          // Check if this is enhanced research data (has synthesis, context, etc.)
+          const isEnhancedResearch = item.synthesis || item.context || item.followUpQuestions;
+          
+          if (isEnhancedResearch) {
+            // Use enhanced research card for AI-powered research
+            return (
+              <Fade in={true} key={`enhanced-${index}`} style={{ transitionDelay: `${index * 150}ms` }}>
+                <EnhancedResearchCard
+                  research={item}
+                  onFollowUpClick={(question) => {
+                    // Add follow-up question as a new topic for research
+                    console.log('Follow-up question:', question);
+                    setSnackbar({
+                      open: true,
+                      message: `Follow-up question noted: ${question}`,
+                      severity: 'info'
+                    });
+                  }}
+                  onSourceClick={(source) => {
+                    // Open source in new tab
+                    window.open(source.url, '_blank');
+                  }}
+                />
+              </Fade>
+            );
+          } else {
+            // Use legacy display for old research format
+            const summary = item; // Maintain compatibility
+            return (
+              <Fade in={true} key={`legacy-${index}`} style={{ transitionDelay: `${index * 150}ms` }}>
+                <Box sx={{ 
+                  p: 2, 
+                  bgcolor: 'rgba(6, 182, 212, 0.05)', 
+                  borderRadius: 2,
+                  border: '1px solid rgba(6, 182, 212, 0.1)',
+                  transition: 'all 0.2s ease',
+                  '&:hover': {
+                    bgcolor: 'rgba(6, 182, 212, 0.08)',
+                    border: '1px solid rgba(6, 182, 212, 0.2)',
+                    transform: 'translateY(-1px)',
+                  }
+                }}>
+                  <Typography variant="subtitle2" sx={{ 
+                    fontWeight: 700, 
+                    mb: 2, 
+                    color: 'secondary.light',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1
+                  }}>
+                    🎯 {summary.topic}
+                  </Typography>
+                  
+                  <Stack spacing={1.5}>
+                    {summary.sources.map((source, i) => (
+                      <Box 
+                        key={i} 
+                        sx={{ 
+                          p: 2, 
+                          bgcolor: 'rgba(15, 23, 42, 0.3)', 
+                          borderRadius: 2,
+                          border: '1px solid rgba(148, 163, 184, 0.1)',
+                          transition: 'all 0.2s ease',
+                          '&:hover': {
+                            bgcolor: 'rgba(15, 23, 42, 0.5)',
+                            border: '1px solid rgba(148, 163, 184, 0.2)',
+                          }
                         }}
-                      />
-                    </Box>
-                    
-                    <Typography 
-                      variant="body2" 
-                      color="text.secondary" 
-                      sx={{ 
-                        mb: 1.5, 
-                        lineHeight: 1.6,
-                        display: '-webkit-box',
-                        WebkitLineClamp: 4,
-                        WebkitBoxOrient: 'vertical',
-                        overflow: 'hidden'
-                      }}
-                    >
-                      {source.summary}
-                    </Typography>
-                    
-                    <Link 
-                      href={source.url} 
-                      target="_blank" 
-                      rel="noopener" 
-                      variant="caption"
-                      sx={{ 
-                        color: 'secondary.light',
-                        textDecoration: 'none',
-                        fontWeight: 600,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 0.5,
-                        '&:hover': {
-                          color: 'secondary.main',
-                          textDecoration: 'underline',
-                        }
-                      }}
-                    >
-                      🔗 Read more
-                    </Link>
-                  </Box>
-                ))}
-              </Stack>
-            </Box>
-          </Fade>
-        ))}
+                      >
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
+                          <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary', flex: 1, mr: 1 }}>
+                            {source.title}
+                          </Typography>
+                          <Chip 
+                            label={source.source} 
+                            size="small" 
+                            sx={{
+                              background: source.source === 'Wikipedia' 
+                                ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+                                : source.source === 'DuckDuckGo'
+                                ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+                                : 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)',
+                              color: 'white',
+                              fontWeight: 500,
+                              fontSize: '11px'
+                            }}
+                          />
+                        </Box>
+                        
+                        <Typography 
+                          variant="body2" 
+                          color="text.secondary" 
+                          sx={{ 
+                            mb: 1.5, 
+                            lineHeight: 1.6,
+                            display: '-webkit-box',
+                            WebkitLineClamp: 4,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden'
+                          }}
+                        >
+                          {source.summary}
+                        </Typography>
+                        
+                        <Link 
+                          href={source.url} 
+                          target="_blank" 
+                          rel="noopener" 
+                          variant="caption"
+                          sx={{ 
+                            color: 'secondary.light',
+                            textDecoration: 'none',
+                            fontWeight: 600,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 0.5,
+                            '&:hover': {
+                              color: 'secondary.main',
+                              textDecoration: 'underline',
+                            }
+                          }}
+                        >
+                          🔗 Read more
+                        </Link>
+                      </Box>
+                    ))}
+                  </Stack>
+                </Box>
+              </Fade>
+            );
+          }
+        })}
       </Stack>
     );
   };
@@ -1197,166 +1539,348 @@ function App() {
             display: 'flex', 
             gap: 3 
           }}>
-            {/* Left Panel: Transcript - Fixed Width 50% */}
-            <Box sx={{ width: '50%' }}>
-              <GlassCard sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                <CardContent sx={{ p: 3, display: 'flex', flexDirection: 'column', height: '100%' }}>
-                  {/* Fixed Header - Never Changes */}
-                  <Box sx={{ mb: 3 }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Box>
-                        <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                          🎤 Live Transcript
-                          {isListening && (
-                            <Chip 
-                              label="RECORDING" 
-                              size="small" 
-                              sx={{ 
-                                background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
-                                color: 'white',
-                                fontWeight: 600,
-                                animation: 'pulse 2s infinite'
-                              }}
-                            />
-                          )}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          {isListening ? 'Listening and processing your conversation...' : 'Click the record button to start'}
-                        </Typography>
-                      </Box>
-                      
-                      {processingStatus && (
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <CircularProgress size={20} color="primary" />
-                          <Typography variant="body2" color="primary.light">
-                            {processingStatus}
-                          </Typography>
-                        </Box>
-                      )}
+            {/* Main Panel: Topic-Centric Dashboard - 70% */}
+            <Box sx={{ width: '70%', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {/* Quick Status & Control Bar */}
+              <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 1 }}>
+                <Zoom in={true}>
+                  <RecordButton
+                    recording={isListening}
+                    onClick={isListening ? stopTranscription : startTranscription}
+                    sx={{ width: 60, height: 60 }}
+                  >
+                    {isListening ? '⏹' : '🎤'}
+                  </RecordButton>
+                </Zoom>
+                
+                <Box sx={{ flex: 1, display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+                  {isListening && (
+                    <Chip 
+                      label="🔴 LIVE RECORDING" 
+                      size="medium" 
+                      sx={{ 
+                        background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                        color: 'white',
+                        fontWeight: 600,
+                        animation: 'pulse 2s infinite'
+                      }}
+                    />
+                  )}
+                  
+                  {topics.length > 0 && (
+                    <Chip 
+                      label={`${topics.length} topics detected`} 
+                      size="medium" 
+                      sx={{ 
+                        background: 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)',
+                        color: 'white'
+                      }}
+                    />
+                  )}
+                  
+                  {research.length > 0 && (
+                    <Chip 
+                      label={`${research.length} research insights`} 
+                      size="medium" 
+                      sx={{ 
+                        background: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)',
+                        color: 'white'
+                      }}
+                    />
+                  )}
+                  
+                  {processingStatus && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <CircularProgress size={20} color="primary" />
+                      <Typography variant="body2" color="primary.light">
+                        {processingStatus}
+                      </Typography>
                     </Box>
-                  </Box>
+                  )}
 
-                  {/* Fixed Height Transcript Area */}
-                  <ScrollableBox sx={{ 
-                    height: 'calc(100vh - 300px)',
-                    p: 2, 
-                    bgcolor: 'rgba(15, 23, 42, 0.5)', 
-                    borderRadius: 2,
-                    border: '1px solid rgba(148, 163, 184, 0.1)',
-                    mb: 3
-                  }}>
-                    {transcript ? (
-                      <Box>
-                        {transcript.split('\n').map((line, index) => {
-                          const isInterim = line.startsWith('〉');
-                          const displayText = isInterim ? line.substring(2) : line;
-                          
-                          return (
-                            <Typography 
-                              key={index}
-                              variant="body1" 
-                              sx={{ 
-                                lineHeight: 1.8,
-                                color: isInterim ? 'text.secondary' : 'text.primary',
-                                fontStyle: isInterim ? 'italic' : 'normal',
-                                opacity: isInterim ? 0.7 : 1,
-                                mb: 0.5,
-                                display: line.trim() ? 'block' : 'none'
-                              }}
-                            >
-                              {displayText}
-                            </Typography>
-                          );
-                        })}
-                      </Box>
-                    ) : (
-                      <Typography 
-                        variant="body1" 
-                        sx={{ 
-                          lineHeight: 1.8,
-                          color: 'text.secondary',
-                        }}
-                      >
-                        🎙️ Start recording to see your conversation appear here in real-time...
+                  {transcript && topics.length > 0 && (
+                    <Button 
+                      variant="contained" 
+                      size="small"
+                      onClick={() => setShowTemplateSelection(true)}
+                      sx={{ 
+                        bgcolor: 'rgba(16, 185, 129, 0.9)', 
+                        '&:hover': { bgcolor: 'rgba(16, 185, 129, 1)' },
+                        ml: 'auto'
+                      }}
+                    >
+                      📝 Generate Report
+                    </Button>
+                  )}
+
+                  {/* Debug: Manual topic extraction button */}
+                  {transcript && transcript.length > 20 && (
+                    <Button 
+                      variant="outlined" 
+                      size="small"
+                      onClick={() => {
+                        console.log('🧪 Debug: Manually triggering topic extraction');
+                        ipcRenderer.send('force-process');
+                      }}
+                      sx={{ 
+                        borderColor: 'rgba(245, 158, 11, 0.5)',
+                        color: 'warning.light',
+                        '&:hover': { 
+                          bgcolor: 'rgba(245, 158, 11, 0.1)',
+                          borderColor: 'warning.main'
+                        }
+                      }}
+                    >
+                      🧪 Test Topics
+                    </Button>
+                  )}
+                </Box>
+              </Box>
+
+              {/* Main Topics Display */}
+              <GlassCard sx={{ flex: 1 }}>
+                <CardContent sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                    <Typography variant="h5" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      🧠 Conversation Topics
+                    </Typography>
+                    {!isListening && topics.length === 0 && (
+                      <Typography variant="body2" color="text.secondary">
+                        Press record to start real-time topic extraction
                       </Typography>
                     )}
-                  </ScrollableBox>
-
-                  {/* Fixed Record Button */}
-                  <Box sx={{ display: 'flex', justifyContent: 'center' }}>
-                    <Zoom in={true}>
-                      <RecordButton
-                        recording={isListening}
-                        onClick={isListening ? stopTranscription : startTranscription}
-                      >
-                        {isListening ? '⏹' : '🎤'}
-                      </RecordButton>
-                    </Zoom>
                   </Box>
+                  
+                  <ScrollableBox sx={{ flex: 1 }}>
+                    {topics.length === 0 ? (
+                      <Box sx={{ textAlign: 'center', py: 8 }}>
+                        <Typography variant="h6" color="text.secondary" sx={{ mb: 2 }}>
+                          🎯 Ready for Real-Time Analysis
+                        </Typography>
+                        <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+                          {isListening 
+                            ? 'Listening... Topics will appear as conversation develops'
+                            : 'Start recording to see conversation topics extracted automatically'
+                          }
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Each topic will appear as a card with instant research access
+                        </Typography>
+                      </Box>
+                    ) : (
+                      <Grid container spacing={3}>
+                        {topics.map((topicData, index) => (
+                          <Grid item xs={12} sm={6} lg={4} key={index}>
+                            <Fade in={true} style={{ transitionDelay: `${index * 100}ms` }}>
+                              <GlassCard sx={{ 
+                                height: '100%',
+                                transition: 'all 0.3s ease',
+                                cursor: 'pointer',
+                                '&:hover': {
+                                  transform: 'translateY(-4px)',
+                                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)'
+                                }
+                              }}>
+                                <CardContent sx={{ p: 3 }}>
+                                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+                                    <Typography variant="caption" color="text.secondary" sx={{ 
+                                      display: 'flex', 
+                                      alignItems: 'center', 
+                                      gap: 0.5,
+                                      fontWeight: 500
+                                    }}>
+                                      ⏰ {new Date(topicData.timestamp).toLocaleTimeString()}
+                                    </Typography>
+                                    <Chip 
+                                      label={`${topicData.topics?.length || 0} topics`} 
+                                      size="small" 
+                                      sx={{ 
+                                        background: 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)',
+                                        color: 'white',
+                                        fontSize: '10px'
+                                      }}
+                                    />
+                                  </Box>
+                                  
+                                  {topicData.topics && topicData.topics.length > 0 && (
+                                    <Box sx={{ mb: 3 }}>
+                                      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                                        {topicData.topics.slice(0, 4).map((topic, i) => (
+                                          <Chip 
+                                            key={i} 
+                                            label={topic} 
+                                            size="small" 
+                                            sx={{ 
+                                              bgcolor: 'rgba(99, 102, 241, 0.1)',
+                                              color: 'primary.light',
+                                              border: '1px solid rgba(99, 102, 241, 0.2)',
+                                              fontSize: '11px',
+                                              fontWeight: 500,
+                                              mb: 0.5
+                                            }}
+                                          />
+                                        ))}
+                                        {topicData.topics.length > 4 && (
+                                          <Chip 
+                                            label={`+${topicData.topics.length - 4}`} 
+                                            size="small" 
+                                            sx={{ 
+                                              bgcolor: 'rgba(148, 163, 184, 0.1)',
+                                              color: 'text.secondary',
+                                              fontSize: '10px'
+                                            }}
+                                          />
+                                        )}
+                                      </Box>
+                                    </Box>
+                                  )}
+                                  
+                                  <Box sx={{ display: 'flex', gap: 1, justifyContent: 'space-between' }}>
+                                    <Button 
+                                      size="small" 
+                                      variant="outlined"
+                                      onClick={() => triggerResearchForTopic(topicData)}
+                                      sx={{ 
+                                        fontSize: '11px', 
+                                        px: 2, 
+                                        flex: 1,
+                                        borderColor: 'rgba(6, 182, 212, 0.3)',
+                                        color: 'secondary.light',
+                                        '&:hover': { 
+                                          bgcolor: 'rgba(6, 182, 212, 0.1)',
+                                          borderColor: 'secondary.main'
+                                        }
+                                      }}
+                                    >
+                                      🔍 Research
+                                    </Button>
+                                    <Button 
+                                      size="small" 
+                                      variant="contained"
+                                      onClick={() => setShowTemplateSelection(true)}
+                                      sx={{ 
+                                        fontSize: '11px', 
+                                        px: 2, 
+                                        flex: 1,
+                                        bgcolor: 'rgba(16, 185, 129, 0.9)',
+                                        '&:hover': { bgcolor: 'rgba(16, 185, 129, 1)' }
+                                      }}
+                                    >
+                                      📝 Report
+                                    </Button>
+                                  </Box>
+                                </CardContent>
+                              </GlassCard>
+                            </Fade>
+                          </Grid>
+                        ))}
+                      </Grid>
+                    )}
+                  </ScrollableBox>
                 </CardContent>
               </GlassCard>
             </Box>
 
-            {/* Middle Panel: Topics & Research - Fixed Width 25% */}
-            <Box sx={{ width: '25%', display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {/* Topics Card - Fixed Height */}
-              <GlassCard sx={{ height: '50%' }}>
+            {/* Side Panel: Research & Compact Info - 30% */}
+            <Box sx={{ width: '30%', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {/* Research Insights - Priority */}
+              <GlassCard sx={{ height: research.length > 0 ? '60%' : '40%' }}>
                 <CardContent sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
-                  <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2, fontSize: '1rem' }}>
-                    🧠 Topics
-                    {topics.length > 0 && (
-                      <Badge badgeContent={topics.length} color="primary" />
-                    )}
-                  </Typography>
-                  <ScrollableBox sx={{ 
-                    height: 'calc(50vh - 120px)',
-                    border: '1px solid rgba(148, 163, 184, 0.1)',
-                    borderRadius: 1,
-                    p: 1
-                  }}>
-                    {renderTopics()}
-                  </ScrollableBox>
-                </CardContent>
-              </GlassCard>
-
-              {/* Research Card - Fixed Height */}
-              <GlassCard sx={{ height: '50%' }}>
-                <CardContent sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
-                  <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2, fontSize: '1rem' }}>
-                    📚 Research
+                  <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                    📚 Research Insights
                     {research.length > 0 && (
                       <Badge badgeContent={research.length} color="secondary" />
                     )}
                   </Typography>
-                  <ScrollableBox sx={{ 
-                    height: 'calc(50vh - 120px)',
-                    border: '1px solid rgba(148, 163, 184, 0.1)',
-                    borderRadius: 1,
-                    p: 1
-                  }}>
-                    {renderResearch()}
+                  <ScrollableBox sx={{ flex: 1 }}>
+                    {research.length === 0 ? (
+                      <Box sx={{ textAlign: 'center', py: 4 }}>
+                        <Typography color="text.secondary" sx={{ mb: 1 }}>
+                          🔍 Ready for Research
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Click "Research" on any topic for instant insights
+                        </Typography>
+                      </Box>
+                    ) : (
+                      renderResearch()
+                    )}
                   </ScrollableBox>
                 </CardContent>
               </GlassCard>
-            </Box>
 
-            {/* Right Panel: Meeting Notes - Fixed Width 25% */}
-            <Box sx={{ width: '25%' }}>
-              <GlassCard sx={{ height: '100%' }}>
+              {/* Quick Meeting Notes */}
+              <GlassCard sx={{ height: research.length > 0 ? '25%' : '35%' }}>
                 <CardContent sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
-                  <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2, fontSize: '1rem' }}>
-                    📝 Meeting Notes
+                  <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                    📝 Quick Notes
                     {meetingNotes && (
                       <Badge badgeContent="✓" color="success" />
                     )}
                   </Typography>
+                  <ScrollableBox sx={{ flex: 1 }}>
+                    {renderMeetingNotes()}
+                  </ScrollableBox>
+                </CardContent>
+              </GlassCard>
+
+              {/* Compact Transcript - Minimal */}
+              <GlassCard sx={{ height: research.length > 0 ? '15%' : '25%' }}>
+                <CardContent sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
+                  <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                    🎤 Recent
+                    {wordCount > 0 && (
+                      <Chip 
+                        label={`${wordCount} words`} 
+                        size="small" 
+                        sx={{ fontSize: '9px' }}
+                      />
+                    )}
+                  </Typography>
                   <ScrollableBox sx={{ 
-                    height: 'calc(100vh - 200px)',
-                    border: '1px solid rgba(148, 163, 184, 0.1)',
+                    flex: 1,
+                    bgcolor: 'rgba(15, 23, 42, 0.3)', 
                     borderRadius: 1,
+                    border: '1px solid rgba(148, 163, 184, 0.1)',
                     p: 1
                   }}>
-                    {renderMeetingNotes()}
+                    {transcript ? (
+                      <Box>
+                        {transcript.split('\n').slice(-8).map((line, index) => {
+                          const isInterim = line.startsWith('〉');
+                          const displayText = isInterim ? line.substring(2) : line;
+                          
+                          return displayText.trim() ? (
+                            <Typography 
+                              key={index}
+                              variant="body2" 
+                              sx={{ 
+                                lineHeight: 1.4,
+                                fontSize: '11px',
+                                mb: 0.3,
+                                color: isInterim ? 'primary.light' : 'text.secondary',
+                                fontStyle: isInterim ? 'italic' : 'normal',
+                                opacity: isInterim ? 0.8 : 0.9
+                              }}
+                            >
+                              {displayText.length > 80 ? displayText.substring(0, 80) + '...' : displayText}
+                            </Typography>
+                          ) : null;
+                        })}
+                      </Box>
+                    ) : (
+                      <Typography 
+                        variant="body2" 
+                        sx={{ 
+                          textAlign: 'center', 
+                          py: 2,
+                          color: 'text.secondary',
+                          fontSize: '11px'
+                        }}
+                      >
+                        🎙️ Transcript preview
+                      </Typography>
+                    )}
                   </ScrollableBox>
                 </CardContent>
               </GlassCard>
@@ -1911,10 +2435,23 @@ function App() {
                 {activeTab === 3 && (
                   <Box sx={{ p: 3 }}>
                     <Typography variant="h6" sx={{ mb: 3, display: 'flex', alignItems: 'center', gap: 1 }}>
-                      📄 Generated Reports
+                      📄 Report Management
                     </Typography>
                     
-                    {loadingReports ? (
+                    {/* View Mode Tabs */}
+                    <Box sx={{ mb: 3 }}>
+                      <Tabs 
+                        value={reportViewMode} 
+                        onChange={(_, newValue) => setReportViewMode(newValue)}
+                        sx={{ mb: 2 }}
+                      >
+                        <Tab label="📝 Generated Reports" value="generated" />
+                        <Tab label="💾 Exported Reports" value="exported" />
+                        <Tab label="⭐ Favorites" value="favorites" />
+                      </Tabs>
+                    </Box>
+                    
+                    {(loadingReports || loadingExportedReports) ? (
                       <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
                         <CircularProgress />
                       </Box>
@@ -1922,81 +2459,267 @@ function App() {
                       <Stack spacing={3}>
                         {/* Report Actions */}
                         <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                          <Button 
-                            variant="contained" 
-                            onClick={loadUserReports}
-                            startIcon={loadingReports ? <CircularProgress size={16} /> : null}
-                            disabled={loadingReports}
-                          >
-                            Refresh Reports
-                          </Button>
+                          {reportViewMode === 'generated' && (
+                            <Button 
+                              variant="contained" 
+                              onClick={loadUserReports}
+                              startIcon={loadingReports ? <CircularProgress size={16} /> : null}
+                              disabled={loadingReports}
+                            >
+                              Refresh Generated Reports
+                            </Button>
+                          )}
+                          {reportViewMode === 'exported' && (
+                            <Button 
+                              variant="contained" 
+                              onClick={loadExportedReports}
+                              startIcon={loadingExportedReports ? <CircularProgress size={16} /> : null}
+                              disabled={loadingExportedReports}
+                            >
+                              Refresh Exported Reports
+                            </Button>
+                          )}
+                          {reportViewMode === 'favorites' && (
+                            <Button 
+                              variant="contained" 
+                              onClick={loadFavoriteReports}
+                              startIcon={loadingReports ? <CircularProgress size={16} /> : null}
+                              disabled={loadingReports}
+                            >
+                              Refresh Favorites
+                            </Button>
+                          )}
                         </Box>
 
-                        {/* Reports Grid */}
-                        <Grid container spacing={2}>
-                          {userReports.map((report) => (
-                            <Grid item xs={12} md={6} key={report._id}>
-                              <GlassCard sx={{ height: '100%' }}>
-                                <CardContent sx={{ p: 2 }}>
-                                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, mb: 2 }}>
-                                    <Typography sx={{ fontSize: '1.2em' }}>
-                                      📄
-                                    </Typography>
-                                    <Box sx={{ flex: 1 }}>
-                                      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
-                                        {report.templateName}
-                                      </Typography>
-                                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                                        Generated: {new Date(report.generatedAt).toLocaleString()}
-                                      </Typography>
-                                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 2 }}>
-                                        <Chip 
-                                          label={`${report.metadata?.tokensUsed || 0} tokens`} 
-                                          size="small" 
-                                          sx={{ 
-                                            background: 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)',
-                                            color: 'white',
-                                            fontSize: '10px'
-                                          }} 
-                                        />
-                                        <Typography variant="caption" color="text.secondary">
-                                          ${(report.metadata?.cost || 0).toFixed(4)}
+                        {/* Generated Reports View */}
+                        {reportViewMode === 'generated' && (
+                          <>
+                            <Grid container spacing={2}>
+                              {userReports.map((report) => (
+                                <Grid item xs={12} md={6} key={report._id}>
+                                  <GlassCard sx={{ height: '100%' }}>
+                                    <CardContent sx={{ p: 2 }}>
+                                      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, mb: 2 }}>
+                                        <Typography sx={{ fontSize: '1.2em' }}>
+                                          📄
                                         </Typography>
+                                        <Box sx={{ flex: 1 }}>
+                                          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
+                                            {report.templateName}
+                                          </Typography>
+                                          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                                            Generated: {new Date(report.generatedAt).toLocaleString()}
+                                          </Typography>
+                                          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 2 }}>
+                                            <Chip 
+                                              label={`${report.metadata?.tokensUsed || 0} tokens`} 
+                                              size="small" 
+                                              sx={{ 
+                                                background: 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)',
+                                                color: 'white',
+                                                fontSize: '10px'
+                                              }} 
+                                            />
+                                            <Typography variant="caption" color="text.secondary">
+                                              ${(report.metadata?.cost || 0).toFixed(4)}
+                                            </Typography>
+                                          </Box>
+                                        </Box>
                                       </Box>
-                                    </Box>
-                                  </Box>
-                                  
-                                  <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
-                                    <Button 
-                                      size="small" 
-                                      variant="contained"
-                                      onClick={() => viewReport(report._id)}
-                                    >
-                                      View Report
-                                    </Button>
-                                    <Button 
-                                      size="small" 
-                                      variant="outlined"
-                                      onClick={() => exportGeneratedReport(report._id)}
-                                    >
-                                      Export
-                                    </Button>
-                                  </Box>
-                                </CardContent>
-                              </GlassCard>
+                                      
+                                      <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                                        <Button 
+                                          size="small" 
+                                          variant="contained"
+                                          onClick={() => viewReport(report._id)}
+                                        >
+                                          View
+                                        </Button>
+                                        <Button 
+                                          size="small" 
+                                          variant="outlined"
+                                          onClick={() => {
+                                            viewReport(report._id);
+                                            setTimeout(() => startEditingReport(), 100);
+                                          }}
+                                          sx={{ bgcolor: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.3)' }}
+                                        >
+                                          ✏️ Edit
+                                        </Button>
+                                        <Button 
+                                          size="small" 
+                                          variant="outlined"
+                                          onClick={() => exportGeneratedReport(report._id)}
+                                        >
+                                          Export
+                                        </Button>
+                                      </Box>
+                                    </CardContent>
+                                  </GlassCard>
+                                </Grid>
+                              ))}
                             </Grid>
-                          ))}
-                        </Grid>
 
-                        {userReports.length === 0 && (
-                          <Box sx={{ textAlign: 'center', py: 4 }}>
-                            <Typography color="text.secondary" sx={{ mb: 2 }}>
-                              📄 No reports generated yet
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              Generate reports from your transcripts using templates.
-                            </Typography>
-                          </Box>
+                            {userReports.length === 0 && (
+                              <Box sx={{ textAlign: 'center', py: 4 }}>
+                                <Typography color="text.secondary" sx={{ mb: 2 }}>
+                                  📄 No reports generated yet
+                                </Typography>
+                                <Typography variant="body2" color="text.secondary">
+                                  Generate reports from your transcripts using templates.
+                                </Typography>
+                              </Box>
+                            )}
+                          </>
+                        )}
+
+                        {/* Exported Reports View */}
+                        {reportViewMode === 'exported' && (
+                          <>
+                            <Grid container spacing={2}>
+                              {exportedReports.map((exportRecord) => (
+                                <Grid item xs={12} md={6} key={exportRecord._id}>
+                                  <GlassCard sx={{ height: '100%' }}>
+                                    <CardContent sx={{ p: 2 }}>
+                                      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, mb: 2 }}>
+                                        <Typography sx={{ fontSize: '1.2em' }}>
+                                          💾
+                                        </Typography>
+                                        <Box sx={{ flex: 1 }}>
+                                          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
+                                            {exportRecord.fileName}
+                                          </Typography>
+                                          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                                            Exported: {new Date(exportRecord.exportedAt).toLocaleString()}
+                                          </Typography>
+                                          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 1 }}>
+                                            <Chip 
+                                              label={exportRecord.format.toUpperCase()} 
+                                              size="small" 
+                                              sx={{ 
+                                                background: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)',
+                                                color: 'white',
+                                                fontSize: '10px'
+                                              }} 
+                                            />
+                                            <Typography variant="caption" color="text.secondary">
+                                              {(exportRecord.fileSize / 1024).toFixed(1)} KB
+                                            </Typography>
+                                          </Box>
+                                          {exportRecord.metadata?.originalReport?.templateName && (
+                                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                              Template: {exportRecord.metadata.originalReport.templateName}
+                                            </Typography>
+                                          )}
+                                        </Box>
+                                      </Box>
+                                      
+                                      <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+                                        <Button 
+                                          size="small" 
+                                          variant="outlined"
+                                          color="error"
+                                          onClick={() => deleteExportedReport(exportRecord._id)}
+                                        >
+                                          Delete
+                                        </Button>
+                                      </Box>
+                                    </CardContent>
+                                  </GlassCard>
+                                </Grid>
+                              ))}
+                            </Grid>
+
+                            {exportedReports.length === 0 && (
+                              <Box sx={{ textAlign: 'center', py: 4 }}>
+                                <Typography color="text.secondary" sx={{ mb: 2 }}>
+                                  💾 No reports exported yet
+                                </Typography>
+                                <Typography variant="body2" color="text.secondary">
+                                  Export reports to see them here for management.
+                                </Typography>
+                              </Box>
+                            )}
+                          </>
+                        )}
+
+                        {/* Favorites View */}
+                        {reportViewMode === 'favorites' && (
+                          <>
+                            <Grid container spacing={2}>
+                              {userReports.map((report) => (
+                                <Grid item xs={12} md={6} key={report._id}>
+                                  <GlassCard sx={{ height: '100%' }}>
+                                    <CardContent sx={{ p: 2 }}>
+                                      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, mb: 2 }}>
+                                        <Typography sx={{ fontSize: '1.2em' }}>
+                                          ⭐
+                                        </Typography>
+                                        <Box sx={{ flex: 1 }}>
+                                          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
+                                            {report.templateName}
+                                          </Typography>
+                                          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                                            Generated: {new Date(report.generatedAt).toLocaleString()}
+                                          </Typography>
+                                          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 2 }}>
+                                            <Chip 
+                                              label="Frequently Exported" 
+                                              size="small" 
+                                              sx={{ 
+                                                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                                color: 'white',
+                                                fontSize: '10px'
+                                              }} 
+                                            />
+                                          </Box>
+                                        </Box>
+                                      </Box>
+                                      
+                                      <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                                        <Button 
+                                          size="small" 
+                                          variant="contained"
+                                          onClick={() => viewReport(report._id)}
+                                        >
+                                          View
+                                        </Button>
+                                        <Button 
+                                          size="small" 
+                                          variant="outlined"
+                                          onClick={() => {
+                                            viewReport(report._id);
+                                            setTimeout(() => startEditingReport(), 100);
+                                          }}
+                                          sx={{ bgcolor: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.3)' }}
+                                        >
+                                          ✏️ Edit
+                                        </Button>
+                                        <Button 
+                                          size="small" 
+                                          variant="outlined"
+                                          onClick={() => exportGeneratedReport(report._id)}
+                                        >
+                                          Export
+                                        </Button>
+                                      </Box>
+                                    </CardContent>
+                                  </GlassCard>
+                                </Grid>
+                              ))}
+                            </Grid>
+
+                            {userReports.length === 0 && (
+                              <Box sx={{ textAlign: 'center', py: 4 }}>
+                                <Typography color="text.secondary" sx={{ mb: 2 }}>
+                                  ⭐ No favorite reports yet
+                                </Typography>
+                                <Typography variant="body2" color="text.secondary">
+                                  Reports that are exported multiple times will appear here as favorites.
+                                </Typography>
+                              </Box>
+                            )}
+                          </>
                         )}
                       </Stack>
                     )}
@@ -2242,7 +2965,10 @@ function App() {
         {/* Report Display Dialog */}
         <Dialog 
           open={showReportDialog} 
-          onClose={() => setShowReportDialog(false)}
+          onClose={() => {
+            setShowReportDialog(false);
+            setIsEditingReport(false);
+          }}
           maxWidth="lg"
           fullWidth
           sx={{
@@ -2260,8 +2986,8 @@ function App() {
             alignItems: 'center',
             gap: 1
           }}>
-            📄 Generated Report
-            {generatedReport?.template && (
+            📄 {isEditingReport ? 'Edit Report' : 'Generated Report'}
+            {generatedReport?.template && !isEditingReport && (
               <Typography variant="body2" color="text.secondary" sx={{ ml: 'auto' }}>
                 {generatedReport.template.name}
               </Typography>
@@ -2272,75 +2998,139 @@ function App() {
             {generatedReport && (
               <Box sx={{ p: 3 }}>
                 {/* Report Header */}
-                <Box sx={{ mb: 3, p: 2, bgcolor: 'rgba(99, 102, 241, 0.05)', borderRadius: 1 }}>
-                  <Typography variant="h6" sx={{ mb: 1 }}>
-                    {generatedReport.template?.name || 'Generated Report'}
-                  </Typography>
-                  <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 2 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      Generated: {generatedReport.generatedAt.toLocaleString()}
+                {!isEditingReport ? (
+                  <Box sx={{ mb: 3, p: 2, bgcolor: 'rgba(99, 102, 241, 0.05)', borderRadius: 1 }}>
+                    <Typography variant="h6" sx={{ mb: 1 }}>
+                      {generatedReport.template?.name || 'Generated Report'}
                     </Typography>
-                    {generatedReport.metadata && (
-                      <>
-                        <Typography variant="body2" color="text.secondary">
-                          Tokens: {generatedReport.metadata.tokensUsed?.toLocaleString() || 0}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          Cost: ${(generatedReport.metadata.cost || 0).toFixed(4)}
-                        </Typography>
-                      </>
-                    )}
+                    <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 2 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Generated: {generatedReport.generatedAt.toLocaleString()}
+                      </Typography>
+                      {generatedReport.metadata && (
+                        <>
+                          <Typography variant="body2" color="text.secondary">
+                            Tokens: {generatedReport.metadata.tokensUsed?.toLocaleString() || 0}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            Cost: ${(generatedReport.metadata.cost || 0).toFixed(4)}
+                          </Typography>
+                        </>
+                      )}
+                    </Box>
+                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                      <Button 
+                        size="small" 
+                        variant="contained"
+                        onClick={() => exportGeneratedReport(generatedReport.id)}
+                        startIcon={null}
+                      >
+                        Export Report
+                      </Button>
+                      <Button 
+                        size="small" 
+                        variant="outlined"
+                        onClick={() => navigator.clipboard.writeText(generatedReport.content)}
+                      >
+                        Copy Content
+                      </Button>
+                      <Button 
+                        size="small" 
+                        variant="outlined"
+                        onClick={startEditingReport}
+                        sx={{ bgcolor: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.3)' }}
+                      >
+                        ✏️ Edit Report
+                      </Button>
+                    </Box>
                   </Box>
-                  <Box sx={{ display: 'flex', gap: 1 }}>
-                    <Button 
-                      size="small" 
-                      variant="contained"
-                      onClick={() => exportGeneratedReport(generatedReport.id)}
-                      startIcon={null}
-                    >
-                      Export Report
-                    </Button>
-                    <Button 
-                      size="small" 
+                ) : (
+                  <Box sx={{ mb: 3, p: 2, bgcolor: 'rgba(16, 185, 129, 0.05)', borderRadius: 1 }}>
+                    <Typography variant="h6" sx={{ mb: 2 }}>
+                      Edit Report Details
+                    </Typography>
+                    <TextField
+                      fullWidth
+                      label="Report Name/Title"
+                      value={editedReportName}
+                      onChange={(e) => setEditedReportName(e.target.value)}
+                      sx={{ mb: 2 }}
                       variant="outlined"
-                      onClick={() => navigator.clipboard.writeText(generatedReport.content)}
-                    >
-                      Copy Content
-                    </Button>
+                    />
                   </Box>
-                </Box>
+                )}
 
                 {/* Report Content */}
-                <Box sx={{ 
-                  p: 3,
-                  bgcolor: 'rgba(15, 23, 42, 0.3)',
-                  borderRadius: 2,
-                  border: '1px solid rgba(148, 163, 184, 0.1)',
-                  maxHeight: '60vh',
-                  overflowY: 'auto'
-                }}>
-                  <pre style={{ 
-                    whiteSpace: 'pre-wrap',
-                    fontFamily: 'inherit',
-                    fontSize: '14px',
-                    lineHeight: '1.6',
-                    margin: 0,
-                    color: 'inherit'
+                {!isEditingReport ? (
+                  <Box sx={{ 
+                    p: 3,
+                    bgcolor: 'rgba(15, 23, 42, 0.3)',
+                    borderRadius: 2,
+                    border: '1px solid rgba(148, 163, 184, 0.1)',
+                    maxHeight: '60vh',
+                    overflowY: 'auto'
                   }}>
-                    {generatedReport.content}
-                  </pre>
-                </Box>
+                    <pre style={{ 
+                      whiteSpace: 'pre-wrap',
+                      fontFamily: 'inherit',
+                      fontSize: '14px',
+                      lineHeight: '1.6',
+                      margin: 0,
+                      color: 'inherit'
+                    }}>
+                      {generatedReport.content}
+                    </pre>
+                  </Box>
+                ) : (
+                  <TextField
+                    fullWidth
+                    multiline
+                    rows={20}
+                    label="Report Content"
+                    value={editedReportContent}
+                    onChange={(e) => setEditedReportContent(e.target.value)}
+                    variant="outlined"
+                    sx={{
+                      '& .MuiInputBase-root': {
+                        bgcolor: 'rgba(15, 23, 42, 0.3)',
+                        fontFamily: 'monospace',
+                        fontSize: '14px',
+                        lineHeight: '1.6',
+                      }
+                    }}
+                  />
+                )}
               </Box>
             )}
           </DialogContent>
           
           <DialogActions sx={{ p: 3, pt: 0 }}>
-            <Button 
-              onClick={() => setShowReportDialog(false)}
-              variant="outlined"
-            >
-              Close
-            </Button>
+            {!isEditingReport ? (
+              <Button 
+                onClick={() => setShowReportDialog(false)}
+                variant="outlined"
+              >
+                Close
+              </Button>
+            ) : (
+              <Box sx={{ display: 'flex', gap: 1, width: '100%', justifyContent: 'flex-end' }}>
+                <Button 
+                  onClick={cancelEditingReport}
+                  variant="outlined"
+                  disabled={savingReport}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={saveReportEdits}
+                  variant="contained"
+                  disabled={savingReport || !editedReportName.trim() || !editedReportContent.trim()}
+                  startIcon={savingReport ? <CircularProgress size={16} /> : null}
+                >
+                  {savingReport ? 'Saving...' : 'Save Changes'}
+                </Button>
+              </Box>
+            )}
           </DialogActions>
         </Dialog>
 
@@ -2357,4 +3147,8 @@ function App() {
 }
 
 const root = createRoot(document.getElementById('root'));
-root.render(<App />); 
+root.render(
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>
+); 

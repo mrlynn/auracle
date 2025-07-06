@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Auracle Splash Screen Test</title>
+  <link rel="stylesheet" href="splash.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <style>
+    /* Test-specific styles */
+    .test-controls {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 1000;
+      display: flex;
+      gap: 10px;
+      flex-direction: column;
+    }
+    
+    .test-btn {
+      padding: 8px 12px;
+      background: rgba(99, 102, 241, 0.8);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-family: 'Press Start 2P';
+      font-size: 8px;
+      cursor: pointer;
+    }
+    
+    .test-btn:hover {
+      background: rgba(99, 102, 241, 1);
+    }
+    
+    .test-info {
+      position: fixed;
+      bottom: 10px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 10px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 10px;
+      max-width: 200px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Test Controls -->
+  <div class="test-controls">
+    <button class="test-btn" onclick="restartAnimation()">Restart</button>
+    <button class="test-btn" onclick="skipToEnd()">Skip</button>
+    <button class="test-btn" onclick="toggleSound()">Toggle Sound</button>
+    <button class="test-btn" onclick="randomizeColors()">Random Colors</button>
+  </div>
+
+  <!-- Main Splash Content -->
+  <div class="loading-container">
+    <!-- Auracle Logo/Icon Area -->
+    <div class="app-icon">
+      <div class="pixel-logo">A</div>
+    </div>
+    
+    <!-- Animated Sprite -->
+    <div class="pixel-sprite"></div>
+    
+    <!-- Loading Text with Typing Animation -->
+    <div class="loading-text-container">
+      <div class="loading-text" id="loadingText">Initializing Auracle...</div>
+      <div class="loading-dots">
+        <span class="dot">.</span>
+        <span class="dot">.</span>
+        <span class="dot">.</span>
+      </div>
+    </div>
+    
+    <!-- Progress Bar -->
+    <div class="progress-container">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+    
+    <!-- Status Messages -->
+    <div class="status-message" id="statusMessage">Starting AI Research Companion</div>
+  </div>
+
+  <!-- Test Info -->
+  <div class="test-info">
+    <strong>Test Mode</strong><br>
+    • Triple-click to skip<br>
+    • Space to skip<br>
+    • Auto-restart in 8s<br>
+    • Click buttons to test
+  </div>
+
+  <script src="splash.js"></script>
+  <script>
+    // Test-specific JavaScript
+    let testSplashScreen;
+    
+    document.addEventListener('DOMContentLoaded', () => {
+      testSplashScreen = new SplashScreen();
+      
+      // Auto-restart for testing
+      setInterval(() => {
+        restartAnimation();
+      }, 8000);
+    });
+    
+    function restartAnimation() {
+      location.reload();
+    }
+    
+    function skipToEnd() {
+      if (testSplashScreen) {
+        testSplashScreen.skipToComplete();
+      }
+    }
+    
+    function toggleSound() {
+      const audio = document.getElementById('loadingSound');
+      if (audio) {
+        if (audio.paused) {
+          audio.play().catch(console.error);
+        } else {
+          audio.pause();
+        }
+      }
+    }
+    
+    function randomizeColors() {
+      const colors = [
+        '#ff6b6b', '#4ecdc4', '#45b7d1', '#f39c12', 
+        '#e74c3c', '#9b59b6', '#1abc9c', '#f1c40f'
+      ];
+      
+      const randomColor = colors[Math.floor(Math.random() * colors.length)];
+      document.documentElement.style.setProperty('--retro-primary', randomColor);
+      
+      const container = document.querySelector('.loading-container');
+      container.style.borderColor = randomColor;
+    }
+    
+    // Override the notifyLoadingComplete to restart instead of close
+    if (window.SplashScreen) {
+      const originalNotify = SplashScreen.prototype.notifyLoadingComplete;
+      SplashScreen.prototype.notifyLoadingComplete = function() {
+        console.log('Loading complete! Restarting in 2 seconds...');
+        setTimeout(restartAnimation, 2000);
+      };
+    }
+  </script>
+</body>
+</html>

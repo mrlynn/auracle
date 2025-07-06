@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Build application
+        run: npm run build
+        
+      - name: Prepare keychain (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          echo ${{ secrets.CSC_LINK }} | base64 -d > certificate.p12
+          security create-keychain -p "${{ secrets.CSC_KEY_PASSWORD }}" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "${{ secrets.CSC_KEY_PASSWORD }}" build.keychain
+          security import certificate.p12 -k build.keychain -P "${{ secrets.CSC_KEY_PASSWORD }}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${{ secrets.CSC_KEY_PASSWORD }}" build.keychain
+          rm certificate.p12
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        
+      - name: Build and release (macOS)
+        if: matrix.os == 'macos-latest'
+        run: npm run release:mac
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASS: ${{ secrets.APPLE_ID_PASS }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Build and release (Windows)
+        if: matrix.os == 'windows-latest'
+        run: npm run release:win
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Build and release (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run release:linux
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Cleanup keychain (macOS)
+        if: matrix.os == 'macos-latest' && always()
+        run: |
+          security delete-keychain build.keychain || true
+
+  notify:
+    needs: release
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Notify completion
+        run: |
+          echo "Release workflow completed"
+          echo "Status: ${{ needs.release.result }}"

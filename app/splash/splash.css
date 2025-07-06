@@ -1,0 +1,295 @@
+/* Auracle Splash Screen - Retro 8-bit Style */
+
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+:root {
+  --retro-bg: #0f172a;
+  --retro-primary: #6366f1;
+  --retro-secondary: #06b6d4;
+  --retro-accent: #10b981;
+  --retro-warning: #f59e0b;
+  --retro-text: #f8fafc;
+  --retro-text-dim: #cbd5e1;
+  --pixel-border: #4338ca;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: linear-gradient(135deg, var(--retro-bg) 0%, #1e293b 50%, #334155 100%);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  font-family: 'Press Start 2P', cursive, monospace;
+  color: var(--retro-text);
+  overflow: hidden;
+  position: relative;
+}
+
+/* Animated background particles */
+body::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(circle at 20% 50%, rgba(99, 102, 241, 0.1) 0%, transparent 50%), 
+              radial-gradient(circle at 80% 20%, rgba(6, 182, 212, 0.1) 0%, transparent 50%);
+  animation: backgroundPulse 4s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes backgroundPulse {
+  from { opacity: 0.3; }
+  to { opacity: 0.7; }
+}
+
+.loading-container {
+  text-align: center;
+  position: relative;
+  z-index: 2;
+  padding: 40px;
+  border: 3px solid var(--pixel-border);
+  border-radius: 0; /* Keep it pixelated */
+  background: rgba(15, 23, 42, 0.9);
+  backdrop-filter: blur(10px);
+  box-shadow: 
+    0 0 0 1px var(--retro-primary),
+    0 0 20px rgba(99, 102, 241, 0.3),
+    inset 0 0 20px rgba(99, 102, 241, 0.1);
+  min-width: 320px;
+  animation: containerGlow 2s ease-in-out infinite alternate;
+}
+
+@keyframes containerGlow {
+  from { box-shadow: 0 0 0 1px var(--retro-primary), 0 0 20px rgba(99, 102, 241, 0.3), inset 0 0 20px rgba(99, 102, 241, 0.1); }
+  to { box-shadow: 0 0 0 1px var(--retro-secondary), 0 0 30px rgba(6, 182, 212, 0.4), inset 0 0 30px rgba(6, 182, 212, 0.15); }
+}
+
+/* App Icon/Logo */
+.app-icon {
+  margin-bottom: 20px;
+}
+
+.pixel-logo {
+  display: inline-block;
+  width: 64px;
+  height: 64px;
+  line-height: 64px;
+  border: 2px solid var(--retro-primary);
+  background: linear-gradient(135deg, var(--retro-primary) 0%, var(--retro-secondary) 100%);
+  color: white;
+  font-size: 24px;
+  font-weight: bold;
+  text-align: center;
+  margin: 0 auto;
+  position: relative;
+  animation: logoSpin 3s linear infinite;
+}
+
+@keyframes logoSpin {
+  0% { transform: rotate(0deg); background: linear-gradient(135deg, var(--retro-primary) 0%, var(--retro-secondary) 100%); }
+  25% { background: linear-gradient(135deg, var(--retro-secondary) 0%, var(--retro-accent) 100%); }
+  50% { background: linear-gradient(135deg, var(--retro-accent) 0%, var(--retro-warning) 100%); }
+  75% { background: linear-gradient(135deg, var(--retro-warning) 0%, var(--retro-primary) 100%); }
+  100% { transform: rotate(360deg); background: linear-gradient(135deg, var(--retro-primary) 0%, var(--retro-secondary) 100%); }
+}
+
+/* Pixel Sprite Animation */
+.pixel-sprite {
+  width: 48px;
+  height: 48px;
+  margin: 20px auto;
+  background: var(--retro-accent);
+  position: relative;
+  animation: spriteHop 1.2s ease-in-out infinite;
+}
+
+/* Create a simple geometric sprite with CSS */
+.pixel-sprite::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 24px;
+  height: 24px;
+  background: var(--retro-primary);
+  animation: innerPulse 0.8s ease-in-out infinite alternate;
+}
+
+.pixel-sprite::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px;
+  height: 12px;
+  background: var(--retro-text);
+  animation: innerPulse 0.6s ease-in-out infinite alternate-reverse;
+}
+
+@keyframes spriteHop {
+  0%, 100% { transform: translateY(0px) scale(1); }
+  50% { transform: translateY(-10px) scale(1.1); }
+}
+
+@keyframes innerPulse {
+  from { opacity: 0.6; }
+  to { opacity: 1; }
+}
+
+/* Loading Text */
+.loading-text-container {
+  margin: 20px 0;
+}
+
+.loading-text {
+  font-size: 14px;
+  color: var(--retro-text);
+  margin-bottom: 10px;
+  animation: textGlow 2s ease-in-out infinite alternate;
+}
+
+@keyframes textGlow {
+  from { color: var(--retro-text); text-shadow: 0 0 10px rgba(248, 250, 252, 0.5); }
+  to { color: var(--retro-primary); text-shadow: 0 0 20px rgba(99, 102, 241, 0.8); }
+}
+
+/* Loading Dots Animation */
+.loading-dots {
+  display: inline-block;
+}
+
+.dot {
+  display: inline-block;
+  animation: dotBounce 1.4s ease-in-out infinite both;
+  color: var(--retro-secondary);
+  font-size: 20px;
+}
+
+.dot:nth-child(1) { animation-delay: -0.32s; }
+.dot:nth-child(2) { animation-delay: -0.16s; }
+.dot:nth-child(3) { animation-delay: 0s; }
+
+@keyframes dotBounce {
+  0%, 80%, 100% { 
+    transform: scale(0.8);
+    opacity: 0.5;
+  }
+  40% { 
+    transform: scale(1.2);
+    opacity: 1;
+  }
+}
+
+/* Progress Bar */
+.progress-container {
+  width: 240px;
+  height: 8px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid var(--retro-primary);
+  margin: 20px auto;
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--retro-primary) 0%, var(--retro-secondary) 50%, var(--retro-accent) 100%);
+  animation: progressFill 3s ease-out infinite;
+  position: relative;
+}
+
+.progress-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+  animation: progressShine 1.5s ease-in-out infinite;
+}
+
+@keyframes progressFill {
+  0% { width: 0%; }
+  70% { width: 85%; }
+  100% { width: 100%; }
+}
+
+@keyframes progressShine {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
+
+/* Status Message */
+.status-message {
+  font-size: 10px;
+  color: var(--retro-text-dim);
+  margin-top: 15px;
+  opacity: 0.8;
+  animation: statusFade 2s ease-in-out infinite alternate;
+}
+
+@keyframes statusFade {
+  from { opacity: 0.6; }
+  to { opacity: 1; }
+}
+
+/* Responsive Design */
+@media (max-width: 480px) {
+  .loading-container {
+    padding: 20px;
+    min-width: 280px;
+  }
+  
+  .loading-text {
+    font-size: 12px;
+  }
+  
+  .pixel-logo {
+    width: 48px;
+    height: 48px;
+    line-height: 48px;
+    font-size: 18px;
+  }
+  
+  .progress-container {
+    width: 200px;
+  }
+}
+
+/* Accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* High contrast mode */
+@media (prefers-contrast: high) {
+  :root {
+    --retro-bg: #000000;
+    --retro-text: #ffffff;
+    --retro-primary: #ffffff;
+    --retro-secondary: #ffffff;
+  }
+  
+  .loading-container {
+    border: 3px solid #ffffff;
+    background: #000000;
+  }
+}

@@ -1,4 +1,11 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, powerSaveBlocker } = require('electron');
+
+// 🚨 EMERGENCY: Limit Electron memory to prevent system exhaustion
+app.commandLine.appendSwitch('max-old-space-size', '512'); // Limit to 512MB
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512');
+
+// Import emergency debugging system
+const EmergencyDebugger = require('../debug-emergency');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -10,21 +17,70 @@ const { getAvailableProviders, testConnection, updateSettings } = require('./ser
 const { getDashboardSummary, getCurrentSessionMetrics, exportUsageData, startNewSession } = require('./services/usageTracker');
 const { saveSession, loadRecentSessions } = require('./storage');
 const { loadConfig, saveConfig } = require('./config');
-const { connect: connectMongo, getTemplates, createTemplate, updateTemplate, deleteTemplate } = require('./services/mongoStorage');
+const { connect: connectMongo, getTemplates, createTemplate, updateTemplate, deleteTemplate, getExportedReports, getExportedReportsByUser, getExportHistory, deleteExportedReport, searchReports, getReportsByDateRange, getFavoriteReports, getStorageStats, saveTemplateVersion, getTemplateHistory, getTemplateVersion, restoreTemplateVersion } = require('./services/mongoStorage');
 const { initializeDatabase, createCustomTemplate, updateCustomTemplate, deleteCustomTemplate, getTemplatesByCategory, searchTemplates, validateTemplateSchema, importTemplate, exportTemplate, exportAllTemplates, importTemplateCollection } = require('./services/templateManager');
-const { generateReport, getReport, getSessionReports, getUserReports, exportReport } = require('./services/reportGenerator');
+const { generateReport, getReport, getSessionReports, getUserReports, updateReport, exportReport } = require('./services/reportGenerator');
+
+// Import emergency debugging toolkit
+const BlankingDebugger = require('../debug-toolkit');
 
 let mainWindow;
+let splashWindow;
 let whisperProc = null;
 let currentSession = null;
+let powerSaveBlockerId = null;
+let emergencyDebugger = null;
+let blankingDebugger = null;
 
-function createWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+function createSplashWindow() {
+  splashWindow = new BrowserWindow({
+    width: 400,
+    height: 500,
+    frame: false,
+    alwaysOnTop: true,
+    transparent: true,
+    resizable: false,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
+    },
+  });
+  
+  splashWindow.loadFile(path.join(__dirname, 'splash/splash.html'));
+  
+  // Hide splash window after 5 seconds or when main window is ready
+  setTimeout(() => {
+    if (splashWindow) {
+      closeSplashWindow();
+    }
+  }, 5000);
+  
+  return splashWindow;
+}
+
+function closeSplashWindow() {
+  if (splashWindow) {
+    splashWindow.close();
+    splashWindow = null;
+  }
+}
+
+function createWindow() {
+  // Initialize emergency debugging toolkit
+  blankingDebugger = new BlankingDebugger();
+  
+  mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    show: false, // Don't show until splash is done
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+      backgroundThrottling: false, // Prevent background throttling during long sessions
+      // Enable additional debugging flags
+      webSecurity: false, // Allow debugging tools
+      allowRunningInsecureContent: true,
+      experimentalFeatures: true,
     },
   });
   mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
@@ -33,6 +89,9 @@ function createWindow() {
   if (process.env.NODE_ENV !== 'production') {
     mainWindow.webContents.openDevTools();
   }
+  
+  // 🚨 START EMERGENCY DEBUGGING
+  emergencyDebugger = new EmergencyDebugger(mainWindow);
   
   // Set up processor event handlers
   setupProcessorHandlers();
@@ -43,14 +102,44 @@ function createWindow() {
       console.log('Sending llm-status to renderer:', connected);
       mainWindow.webContents.send('ollama-status', connected);
     });
+    
+    // Inject emergency diagnostic script
+    try {
+      const diagnosticScript = fs.readFileSync(path.join(__dirname, '../debug-renderer.js'), 'utf8');
+      mainWindow.webContents.executeJavaScript(diagnosticScript);
+      console.log('🔍 Emergency renderer debugging script injected');
+    } catch (error) {
+      console.error('Failed to inject debugging script:', error);
+    }
   });
   
-  // Check LLM status periodically
-  setInterval(async () => {
-    const connected = await testLLMConnection();
-    console.log('Periodic llm-status check:', connected);
-    mainWindow.webContents.send('ollama-status', connected);
-  }, 5000); // Check every 5 seconds
+  // Check LLM status periodically with recursive timeout to prevent accumulation
+  let statusCheckTimeout;
+  const checkLLMStatusPeriodically = async () => {
+    try {
+      const connected = await testLLMConnection();
+      console.log('Periodic llm-status check:', connected);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('ollama-status', connected);
+      }
+    } catch (error) {
+      console.error('LLM status check error:', error);
+    }
+    
+    // Schedule next check only after current one completes
+    statusCheckTimeout = setTimeout(checkLLMStatusPeriodically, 5000);
+  };
+  
+  // Start the periodic check
+  checkLLMStatusPeriodically();
+  
+  // Clean up timeout when window is closed
+  mainWindow.on('closed', () => {
+    if (statusCheckTimeout) {
+      clearTimeout(statusCheckTimeout);
+      statusCheckTimeout = null;
+    }
+  });
 }
 
 function setupProcessorHandlers() {
@@ -95,11 +184,36 @@ async function initializeServices() {
 }
 
 app.whenReady().then(() => {
+  // Show splash screen first
+  createSplashWindow();
+  
+  // Create main window but don't show it yet
   createWindow();
-  initializeServices();
+  
+  // Initialize services and show main window when ready
+  initializeServices().then(() => {
+    // Services loaded, show main window and close splash
+    mainWindow.show();
+    closeSplashWindow();
+  }).catch((error) => {
+    console.error('Failed to initialize services:', error);
+    // Still show main window even if some services fail
+    mainWindow.show();
+    closeSplashWindow();
+  });
 });
 
 app.on('window-all-closed', () => {
+  // Clean up power save blocker
+  if (powerSaveBlockerId !== null) {
+    try {
+      powerSaveBlocker.stop(powerSaveBlockerId);
+      powerSaveBlockerId = null;
+    } catch (error) {
+      console.error('Failed to stop power save blocker on exit:', error);
+    }
+  }
+  
   if (process.platform !== 'darwin') {
     app.quit();
   }
@@ -111,9 +225,37 @@ app.on('activate', () => {
   }
 });
 
+// IPC: Splash screen handlers
+ipcMain.on('splash-loading-complete', () => {
+  if (mainWindow) {
+    mainWindow.show();
+  }
+  closeSplashWindow();
+});
+
+ipcMain.handle('splash-update-progress', (event, progress) => {
+  if (splashWindow) {
+    splashWindow.webContents.send('loading-progress', progress);
+  }
+});
+
+ipcMain.handle('splash-update-status', (event, status) => {
+  if (splashWindow) {
+    splashWindow.webContents.send('loading-status', status);
+  }
+});
+
 // IPC: Start transcription
 ipcMain.on('start-transcription', (event) => {
   if (whisperProc) return; // Already running
+  
+  // Prevent system sleep during recording
+  try {
+    powerSaveBlockerId = powerSaveBlocker.start('prevent-display-sleep');
+    console.log('Display sleep prevention started');
+  } catch (error) {
+    console.error('Failed to start power save blocker:', error);
+  }
   
   // Create new session
   currentSession = {
@@ -160,11 +302,74 @@ ipcMain.on('start-transcription', (event) => {
   });
 });
 
+// IPC: Handle renderer errors
+ipcMain.on('renderer-error', (event, errorData) => {
+  console.error('🚨 Renderer error received:', errorData);
+  
+  // Log the error for debugging
+  console.error('Renderer crash details:', {
+    message: errorData.message,
+    timestamp: errorData.timestamp,
+    stack: errorData.stack
+  });
+  
+  // Could implement crash recovery here
+  // For now, just log it
+});
+
+// IPC: Emergency debugging handlers
+ipcMain.on('debug-log', (event, logData) => {
+  console.log(`🔍 RENDERER: [${logData.timestamp}] ${logData.level}: ${logData.message}`, logData.data);
+});
+
+ipcMain.on('debug-pong', (event, data) => {
+  if (emergencyDebugger) {
+    emergencyDebugger.receivePong();
+  }
+  console.log('🔍 Renderer pong received:', data);
+});
+
+// Manual debugging commands
+ipcMain.handle('debug-force-analysis', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('debug-force-analysis');
+  }
+  return { success: true };
+});
+
+ipcMain.handle('debug-force-recovery', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('debug-force-recovery');
+  }
+  return { success: true };
+});
+
+ipcMain.handle('debug-get-system-info', () => {
+  return {
+    platform: process.platform,
+    arch: process.arch,
+    memory: process.memoryUsage(),
+    uptime: process.uptime(),
+    nodeVersion: process.version
+  };
+});
+
 // IPC: Stop transcription
 ipcMain.on('stop-transcription', async () => {
   if (whisperProc) {
     whisperProc.kill();
     whisperProc = null;
+    
+    // Allow system sleep again
+    if (powerSaveBlockerId !== null) {
+      try {
+        powerSaveBlocker.stop(powerSaveBlockerId);
+        powerSaveBlockerId = null;
+        console.log('Display sleep prevention stopped');
+      } catch (error) {
+        console.error('Failed to stop power save blocker:', error);
+      }
+    }
     
     // Flush any remaining buffer
     processor.flush();
@@ -200,7 +405,22 @@ ipcMain.handle('get-config', () => {
 
 // IPC: Force process current buffer
 ipcMain.on('force-process', () => {
+  console.log('🔧 Main: Force processing requested');
   processor.flush();
+});
+
+// IPC: Test topic extraction directly
+ipcMain.handle('test-topic-extraction', async (_, text) => {
+  try {
+    console.log('🧪 Main: Testing topic extraction with text:', text?.substring(0, 50));
+    const { extractTopics } = require('./services/llmProviders');
+    const result = await extractTopics(text || 'This is a test about machine learning and artificial intelligence.');
+    console.log('✅ Main: Topic extraction test result:', result);
+    return { success: true, result };
+  } catch (error) {
+    console.error('❌ Main: Topic extraction test failed:', error);
+    return { success: false, error: error.message };
+  }
 });
 
 // IPC: Check LLM status immediately
@@ -208,6 +428,61 @@ ipcMain.on('check-ollama-status', async () => {
   const connected = await testLLMConnection();
   console.log('Manual llm-status check:', connected);
   mainWindow.webContents.send('ollama-status', connected);
+});
+
+// IPC: Trigger research for specific topics
+ipcMain.handle('trigger-research', async (_, data) => {
+  console.log('Manual research triggered for topics:', data.topics);
+  
+  try {
+    const { fetchResearchSummaries } = require('./services/research/index');
+    
+    // Filter out invalid topics
+    const validTopics = data.topics.filter(topic => 
+      topic && 
+      typeof topic === 'string' && 
+      topic.length > 2 && 
+      !topic.includes('BLANK_AUDIO') && 
+      !topic.includes('NULL') && 
+      !topic.includes('UNDEFINED')
+    );
+    
+    if (validTopics.length === 0) {
+      console.log('No valid topics to research');
+      return { success: false, error: 'No valid topics provided' };
+    }
+    
+    // Fetch research summaries
+    const summaries = await fetchResearchSummaries(
+      validTopics,
+      data.transcript || '',
+      [] // No previous research context for manual triggers
+    );
+    
+    console.log(`Research completed for ${validTopics.length} topics, found ${summaries.length} summaries`);
+    
+    // Emit research-completed event to renderer
+    if (summaries.length > 0) {
+      mainWindow.webContents.send('research-completed', {
+        summaries: summaries,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Add to session if available
+      if (currentSession) {
+        currentSession.research.push({
+          summaries: summaries,
+          timestamp: new Date().toISOString(),
+          triggeredManually: true
+        });
+      }
+    }
+    
+    return { success: true, summariesCount: summaries.length };
+  } catch (error) {
+    console.error('Error triggering research:', error);
+    return { success: false, error: error.message };
+  }
 });
 
 // IPC: Generate meeting notes
@@ -524,6 +799,17 @@ ipcMain.handle('get-user-reports', async (_, filter = {}, options = {}) => {
   }
 });
 
+// IPC: Update report
+ipcMain.handle('update-report', async (_, reportId, updates) => {
+  try {
+    const result = await updateReport(reportId, updates);
+    return result;
+  } catch (error) {
+    console.error('Error updating report:', error);
+    return { error: error.message };
+  }
+});
+
 // IPC: Export report
 ipcMain.handle('export-report', async (_, reportId, format = 'markdown') => {
   try {
@@ -628,4 +914,173 @@ ipcMain.handle('import-template-collection', async (_, collectionJson) => {
     console.error('Error importing template collection:', error);
     return { error: error.message };
   }
-}); 
+});
+
+// IPC: Get exported reports
+ipcMain.handle('get-exported-reports', async (_, filter = {}, options = {}) => {
+  try {
+    const reports = await getExportedReports(filter, options);
+    return { success: true, reports };
+  } catch (error) {
+    console.error('Error getting exported reports:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Get exported reports by user
+ipcMain.handle('get-exported-reports-by-user', async (_, userId = 'default-user', options = {}) => {
+  try {
+    const reports = await getExportedReportsByUser(userId, options);
+    return { success: true, reports };
+  } catch (error) {
+    console.error('Error getting exported reports by user:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Get export history for a report
+ipcMain.handle('get-export-history', async (_, reportId) => {
+  try {
+    const history = await getExportHistory(reportId);
+    return { success: true, history };
+  } catch (error) {
+    console.error('Error getting export history:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Delete exported report
+ipcMain.handle('delete-exported-report', async (_, exportId) => {
+  try {
+    const result = await deleteExportedReport(exportId);
+    return { success: true, deleted: result.deletedCount > 0 };
+  } catch (error) {
+    console.error('Error deleting exported report:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Search reports
+ipcMain.handle('search-reports', async (_, query, options = {}) => {
+  try {
+    const reports = await searchReports(query, options);
+    return { success: true, reports };
+  } catch (error) {
+    console.error('Error searching reports:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Get reports by date range
+ipcMain.handle('get-reports-by-date-range', async (_, startDate, endDate, options = {}) => {
+  try {
+    const reports = await getReportsByDateRange(startDate, endDate, options);
+    return { success: true, reports };
+  } catch (error) {
+    console.error('Error getting reports by date range:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Get favorite reports
+ipcMain.handle('get-favorite-reports', async (_, userId = 'default-user', options = {}) => {
+  try {
+    const reports = await getFavoriteReports(userId, options);
+    return { success: true, reports };
+  } catch (error) {
+    console.error('Error getting favorite reports:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Get storage statistics
+ipcMain.handle('get-storage-stats', async () => {
+  try {
+    const stats = await getStorageStats();
+    return { success: true, stats };
+  } catch (error) {
+    console.error('Error getting storage stats:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Save template version
+ipcMain.handle('save-template-version', async (_, templateId, templateData, action = 'updated') => {
+  try {
+    const result = await saveTemplateVersion(templateId, templateData, action);
+    return { success: true, versionId: result.insertedId };
+  } catch (error) {
+    console.error('Error saving template version:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Get template history
+ipcMain.handle('get-template-history', async (_, templateId, options = {}) => {
+  try {
+    const history = await getTemplateHistory(templateId, options);
+    return { success: true, history };
+  } catch (error) {
+    console.error('Error getting template history:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Get specific template version
+ipcMain.handle('get-template-version', async (_, templateId, version) => {
+  try {
+    const versionData = await getTemplateVersion(templateId, version);
+    return { success: true, versionData };
+  } catch (error) {
+    console.error('Error getting template version:', error);
+    return { error: error.message };
+  }
+});
+
+// IPC: Restore template version
+ipcMain.handle('restore-template-version', async (_, templateId, version) => {
+  try {
+    const result = await restoreTemplateVersion(templateId, version);
+    return { success: true, restoredData: result };
+  } catch (error) {
+    console.error('Error restoring template version:', error);
+    return { error: error.message };
+  }
+});
+
+// Emergency Debug IPC Handlers
+ipcMain.handle('debug-generate-report', async () => {
+  if (blankingDebugger) {
+    const reportPath = blankingDebugger.generateDebugReport();
+    console.log('🔧 Debug report generated:', reportPath);
+    return { success: true, reportPath };
+  }
+  return { error: 'Debugger not initialized' };
+});
+
+ipcMain.handle('debug-capture-snapshot', async (_, trigger) => {
+  if (blankingDebugger) {
+    blankingDebugger.captureDebugSnapshot(trigger || 'manual');
+    return { success: true };
+  }
+  return { error: 'Debugger not initialized' };
+});
+
+ipcMain.on('debug-emergency-recovery', () => {
+  console.log('🚨 Emergency recovery initiated from renderer');
+  
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    // Try to restore window
+    mainWindow.show();
+    mainWindow.focus();
+    
+    // Reload the page
+    mainWindow.webContents.reload();
+    
+    // Re-inject diagnostic script after reload
+    mainWindow.webContents.once('did-finish-load', () => {
+      const diagnosticScript = fs.readFileSync(path.join(__dirname, '../emergency-diagnostic.js'), 'utf8');
+      mainWindow.webContents.executeJavaScript(diagnosticScript);
+    });
+  }
+});

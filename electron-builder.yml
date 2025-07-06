@@ -1,0 +1,116 @@
+appId: com.auracle.desktop
+productName: Auracle
+copyright: Copyright © 2025 Auracle. All rights reserved.
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  - app/**/*
+  - node_modules/**/*
+  - "!app/src/**/*"
+  - "!**/node_modules/*/{CHANGELOG.md,README.md,readme.md,LICENSE,*.flow,*.mk}"
+  - "!**/node_modules/.bin"
+  - "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}"
+  - "!.editorconfig"
+  - "!**/._*"
+  - "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}"
+  - "!**/{__pycache__,thumbs.db,.flowconfig,.idea,.vs,.nyc_output}"
+  - "!**/{appveyor.yml,.travis.yml,circle.yml}"
+  - "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}"
+
+extraResources:
+  - from: whisper.cpp/models/
+    to: models/
+    filter: ["**/*.bin"]
+  - from: whisper.cpp/build/bin/
+    to: bin/
+    filter: ["whisper-stream*", "whisper*"]
+
+mac:
+  category: public.app-category.productivity
+  icon: build/icons/mac/icon.icns
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  type: distribution
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64, arm64]
+
+dmg:
+  title: "${productName} ${version}"
+  icon: build/icons/mac/icon.icns
+  background: build/dmg-background.png
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+win:
+  icon: build/icons/windows/icon.ico
+  target:
+    - target: nsis
+      arch: [x64, ia32]
+    - target: portable
+      arch: [x64, ia32]
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  installerIcon: build/icons/windows/icon.ico
+  uninstallerIcon: build/icons/windows/icon.ico
+
+linux:
+  icon: build/icons/linux/
+  category: Office
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: snap
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+
+snap:
+  summary: AI-powered real-time conversation research companion
+  description: |
+    Auracle listens to conversations in real-time, transcribes speech,
+    extracts topics, and automatically researches relevant information
+    to enhance discussions with intelligent insights.
+  grade: stable
+  confinement: strict
+  plugs:
+    - audio-record
+    - network
+    - home
+
+deb:
+  depends:
+    - gconf2
+    - gconf-service
+    - libnotify4
+    - libappindicator1
+    - libxtst6
+    - libnss3
+    - libasound2
+    - libdrm2
+    - libxss1
+    - libgconf-2-4
+
+publish:
+  provider: github
+  releaseType: release
+
+afterPack: scripts/afterPack.js
+afterSign: scripts/notarize.js

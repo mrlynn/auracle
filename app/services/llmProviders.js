@@ -33,15 +33,24 @@ class LLMProviderManager {
   }
 
   async extractTopics(text) {
+    console.log('🤖 LLM Manager: Starting topic extraction with provider:', this.config.llm.provider);
     const provider = this.getCurrentProvider();
-    const result = await provider.extractTopics(text, this.config);
+    console.log('🔧 LLM Manager: Using provider:', provider.getName());
     
-    // Track usage for topic extraction
-    const inputTokens = this.estimateTokens(provider.buildTopicsPrompt(text));
-    const outputTokens = this.estimateTokens(JSON.stringify(result));
-    trackRequest('topicExtraction', inputTokens, outputTokens, this.config.llm.provider, this.config.llm.model);
-    
-    return result;
+    try {
+      const result = await provider.extractTopics(text, this.config);
+      console.log('✅ LLM Manager: Topic extraction successful:', result);
+      
+      // Track usage for topic extraction
+      const inputTokens = this.estimateTokens(provider.buildTopicsPrompt(text));
+      const outputTokens = this.estimateTokens(JSON.stringify(result));
+      trackRequest('topicExtraction', inputTokens, outputTokens, this.config.llm.provider, this.config.llm.model);
+      
+      return result;
+    } catch (error) {
+      console.error('❌ LLM Manager: Topic extraction failed:', error);
+      throw error;
+    }
   }
 
   async generateMeetingNotes(transcript, topics, research) {
@@ -305,6 +314,10 @@ class OpenAIProvider extends BaseProvider {
   }
 
   async generateCompletion(prompt, config, options = {}) {
+    console.log('🔑 OpenAI: Starting completion with model:', config.llm.model);
+    console.log('🔐 OpenAI: API key present:', !!config.llm.openaiApiKey);
+    console.log('📝 OpenAI: Prompt length:', prompt.length);
+    
     const payload = {
       model: config.llm.model || 'gpt-3.5-turbo',
       messages: [{ role: 'user', content: prompt }],
@@ -312,13 +325,42 @@ class OpenAIProvider extends BaseProvider {
       max_tokens: options.maxTokens || 2000
     };
 
+    // Only use JSON format for models that support it (gpt-4o, gpt-4o-mini, gpt-3.5-turbo-1106+)
+    const supportsJsonFormat = ['gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo-1106', 'gpt-3.5-turbo'].includes(config.llm.model);
+    
     if (options.format === 'json') {
-      payload.response_format = { type: 'json_object' };
+      if (supportsJsonFormat) {
+        payload.response_format = { type: 'json_object' };
+        console.log('📋 OpenAI: Requesting JSON format');
+      } else {
+        console.log('📋 OpenAI: Model does not support JSON format, using text prompt');
+      }
       payload.messages[0].content = 'Respond with valid JSON only. ' + prompt;
     }
 
-    const response = await this.makeAPIRequest(config, '/chat/completions', 'POST', payload);
-    return response.choices[0].message.content;
+    try {
+      console.log('🌐 OpenAI: Making API request...');
+      const response = await this.makeAPIRequest(config, '/chat/completions', 'POST', payload);
+      console.log('✅ OpenAI: API request successful');
+      
+      // Check if we got an error response
+      if (response.error) {
+        console.error('❌ OpenAI: API returned error:', response.error);
+        throw new Error(`OpenAI API error: ${response.error.message}`);
+      }
+      
+      // Check if response has expected structure
+      if (!response.choices || !response.choices[0] || !response.choices[0].message) {
+        console.error('❌ OpenAI: Unexpected response structure:', JSON.stringify(response, null, 2));
+        throw new Error('Unexpected response structure from OpenAI API');
+      }
+      
+      console.log('🔍 OpenAI: Response received successfully');
+      return response.choices[0].message.content;
+    } catch (error) {
+      console.error('❌ OpenAI: API request failed:', error);
+      throw error;
+    }
   }
 
   async makeAPIRequest(config, path, method, data = null) {

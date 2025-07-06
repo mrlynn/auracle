@@ -1,11 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
   CssBaseline, Typography, Box, Chip, 
   Alert, Link, Stack, Card,
   AppBar, Toolbar, Fab, Fade, Avatar, Dialog,
   DialogTitle, DialogContent, DialogActions, Button, 
-  IconButton, Snackbar, FormControl, Select, MenuItem
+  IconButton, Snackbar, FormControl, Select, MenuItem,
+  Tabs, Tab, Paper, List, ListItem, ListItemText,
+  ListItemSecondaryAction, Switch, TextField, CircularProgress,
+  Divider, Grid
 } from '@mui/material';
 import { styled, createTheme, ThemeProvider } from '@mui/material/styles';
 
@@ -13,6 +16,22 @@ import { styled, createTheme, ThemeProvider } from '@mui/material/styles';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 const { ipcRenderer } = window.require('electron');
+
+// Tab Panel Component
+function TabPanel(props) {
+  const { children, value, index, ...other } = props;
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`settings-tabpanel-${index}`}
+      aria-labelledby={`settings-tab-${index}`}
+      {...other}
+    >
+      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
+    </div>
+  );
+}
 
 // Professional dark theme
 const theme = createTheme({
@@ -240,6 +259,31 @@ function App() {
   const [editedReportName, setEditedReportName] = useState('');
   const [editedReportContent, setEditedReportContent] = useState('');
   const [savingReport, setSavingReport] = useState(false);
+  
+  // Ref for auto-scrolling transcript
+  const transcriptRef = useRef(null);
+  
+  // Auto-scroll transcript when it updates
+  useEffect(() => {
+    if (transcriptRef.current) {
+      transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
+    }
+  }, [transcript]);
+
+  // Load settings data when dialog opens
+  useEffect(() => {
+    if (showSettings) {
+      loadTemplates();
+      loadMetrics();
+      if (reportViewMode === 'generated') {
+        loadUserReports();
+      } else if (reportViewMode === 'exported') {
+        loadExportedReports();
+      } else if (reportViewMode === 'favorites') {
+        loadFavoriteReports();
+      }
+    }
+  }, [showSettings, reportViewMode]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1289,10 +1333,12 @@ function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Box sx={{ 
-        minHeight: '100vh',
+        height: '100vh',
         background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)',
         position: 'relative',
-        overflow: 'hidden'
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column'
       }}>
         {/* Background decoration */}
         <Box sx={{
@@ -1345,18 +1391,19 @@ function App() {
               </StatusIndicator>
 
               {/* LLM Provider Selector */}
-              <FormControl size="small" sx={{ minWidth: 120 }}>
-                <Select
-                  value={settings.llm?.provider || 'ollama'}
-                  onChange={(e) => {
-                    const newProvider = e.target.value;
-                    const newSettings = {
-                      ...settings,
-                      llm: { ...settings.llm, provider: newProvider }
-                    };
-                    setSettings(newSettings);
-                    handleSettingsUpdate(newSettings);
-                  }}
+              {settings && (
+                <FormControl size="small" sx={{ minWidth: 120 }}>
+                  <Select
+                    value={settings?.llm?.provider || 'ollama'}
+                    onChange={(e) => {
+                      const newProvider = e.target.value;
+                      const newSettings = {
+                        ...settings,
+                        llm: { ...(settings?.llm || {}), provider: newProvider }
+                      };
+                      setSettings(newSettings);
+                      handleSettingsUpdate(newSettings);
+                    }}
                   displayEmpty
                   variant="outlined"
                   sx={{
@@ -1390,6 +1437,7 @@ function App() {
                   ))}
                 </Select>
               </FormControl>
+              )}
               
               {wordCount > 0 && (
                 <Chip 
@@ -1415,7 +1463,7 @@ function App() {
         </AppBar>
 
         {/* Main Content Area with New Layout */}
-        <Box sx={{ flex: 1, display: 'flex', position: 'relative', zIndex: 1 }}>
+        <Box sx={{ flex: 1, display: 'flex', position: 'relative', zIndex: 1, overflow: 'hidden' }}>
           {!ollamaConnected && (
             <Fade in={!ollamaConnected}>
               <Alert 
@@ -1444,7 +1492,8 @@ function App() {
             flexDirection: 'column', 
             borderRight: '1px solid rgba(148, 163, 184, 0.1)',
             p: 3,
-            gap: 2 
+            gap: 2,
+            overflow: 'hidden'
           }}>
             {/* Action Buttons Row */}
             <Box sx={{ display: 'flex', gap: 1.5 }}>
@@ -1661,7 +1710,8 @@ function App() {
             display: 'flex', 
             flexDirection: 'column',
             p: 3,
-            gap: 2 
+            gap: 2,
+            overflow: 'hidden'
           }}>
             {/* Main conversation content would go here */}
             {transcript && (
@@ -1670,20 +1720,41 @@ function App() {
                 p: 3,
                 background: 'rgba(248, 250, 252, 0.02)',
                 border: '1px solid rgba(148, 163, 184, 0.1)',
-                borderRadius: 2
+                borderRadius: 2,
+                display: 'flex',
+                flexDirection: 'column',
+                minHeight: 0 // Important for flexbox children
               }}>
-                <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
+                <Typography variant="h6" sx={{ mb: 2, fontWeight: 600, flexShrink: 0 }}>
                   📝 Live Transcript
                 </Typography>
-                <Box sx={{ 
-                  maxHeight: '400px', 
-                  overflow: 'auto',
-                  fontFamily: 'monospace',
-                  fontSize: '14px',
-                  lineHeight: 1.6,
-                  whiteSpace: 'pre-wrap',
-                  color: 'text.primary'
-                }}>
+                <Box 
+                  ref={transcriptRef}
+                  sx={{ 
+                    flex: 1,
+                    overflow: 'auto',
+                    fontFamily: 'monospace',
+                    fontSize: '14px',
+                    lineHeight: 1.6,
+                    whiteSpace: 'pre-wrap',
+                    color: 'text.primary',
+                    minHeight: 0, // Important for flexbox children
+                    '&::-webkit-scrollbar': {
+                      width: '8px',
+                    },
+                    '&::-webkit-scrollbar-track': {
+                      background: 'rgba(148, 163, 184, 0.1)',
+                      borderRadius: '4px',
+                    },
+                    '&::-webkit-scrollbar-thumb': {
+                      background: 'rgba(148, 163, 184, 0.3)',
+                      borderRadius: '4px',
+                      '&:hover': {
+                        background: 'rgba(148, 163, 184, 0.5)',
+                      }
+                    }
+                  }}
+                >
                   {transcript}
                 </Box>
               </Card>
@@ -1804,12 +1875,13 @@ function App() {
           <Dialog
             open={true}
             onClose={() => setShowSettings(false)}
-            maxWidth="md"
+            maxWidth="lg"
             fullWidth
             PaperProps={{
               sx: {
                 bgcolor: 'background.paper',
-                backgroundImage: 'none'
+                backgroundImage: 'none',
+                minHeight: '80vh'
               }
             }}
           >
@@ -1818,11 +1890,305 @@ function App() {
                 ⚙️ Settings
               </Typography>
             </DialogTitle>
-            <DialogContent>
-              <SettingsPanel 
-                settings={settings} 
-                onSettingsChange={handleSettingsUpdate}
-              />
+            <DialogContent sx={{ p: 0 }}>
+              <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+                <Tabs 
+                  value={activeTab} 
+                  onChange={(e, newValue) => setActiveTab(newValue)}
+                  variant="scrollable"
+                  scrollButtons="auto"
+                >
+                  <Tab label="General" />
+                  <Tab label="AI Providers" />
+                  <Tab label="Templates" />
+                  <Tab label="Reports" />
+                  <Tab label="Metrics" />
+                  <Tab label="Advanced" />
+                </Tabs>
+              </Box>
+
+              <TabPanel value={activeTab} index={0}>
+                {/* General Settings */}
+                <Stack spacing={3}>
+                  <Box>
+                    <Typography variant="h6" gutterBottom>General Settings</Typography>
+                    <List>
+                      <ListItem>
+                        <ListItemText 
+                          primary="Auto-save transcripts"
+                          secondary="Automatically save conversation transcripts"
+                        />
+                        <ListItemSecondaryAction>
+                          <Switch
+                            checked={settings?.autoSave || false}
+                            onChange={(e) => handleSettingsUpdate({
+                              ...settings,
+                              autoSave: e.target.checked
+                            })}
+                          />
+                        </ListItemSecondaryAction>
+                      </ListItem>
+                      <ListItem>
+                        <ListItemText 
+                          primary="Dark mode"
+                          secondary="Use dark theme (currently always on)"
+                        />
+                        <ListItemSecondaryAction>
+                          <Switch checked={true} disabled />
+                        </ListItemSecondaryAction>
+                      </ListItem>
+                    </List>
+                  </Box>
+                </Stack>
+              </TabPanel>
+
+              <TabPanel value={activeTab} index={1}>
+                {/* AI Providers */}
+                <Stack spacing={3}>
+                  <Box>
+                    <Typography variant="h6" gutterBottom>AI Provider Configuration</Typography>
+                    <FormControl fullWidth sx={{ mb: 3 }}>
+                      <Typography variant="body2" sx={{ mb: 1 }}>Active Provider</Typography>
+                      <Select
+                        value={settings?.llm?.provider || 'ollama'}
+                        onChange={(e) => handleSettingsUpdate({
+                          ...settings,
+                          llm: { ...(settings?.llm || {}), provider: e.target.value }
+                        })}
+                      >
+                        {llmProviders.map(provider => (
+                          <MenuItem key={provider.id} value={provider.id}>
+                            {provider.name}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+
+                    <Box sx={{ mt: 3 }}>
+                      <Typography variant="body2" gutterBottom>Provider Status</Typography>
+                      {llmProviders.map(provider => (
+                        <Box key={provider.id} sx={{ mb: 2, p: 2, border: 1, borderColor: 'divider', borderRadius: 1 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <Typography variant="subtitle2">{provider.name}</Typography>
+                            <Button
+                              size="small"
+                              onClick={() => testProviderConnection(provider.id)}
+                              disabled={testingConnection}
+                            >
+                              Test Connection
+                            </Button>
+                          </Box>
+                          <Typography variant="body2" color="text.secondary">
+                            {provider.id === 'ollama' && 'Local Ollama instance'}
+                            {provider.id === 'openai' && 'OpenAI API'}
+                            {provider.id === 'anthropic' && 'Anthropic Claude API'}
+                          </Typography>
+                        </Box>
+                      ))}
+                    </Box>
+                  </Box>
+                </Stack>
+              </TabPanel>
+
+              <TabPanel value={activeTab} index={2}>
+                {/* Templates */}
+                <Stack spacing={3}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="h6">Report Templates</Typography>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Button size="small" onClick={() => loadTemplates()}>
+                        Refresh
+                      </Button>
+                      <Button size="small" onClick={() => exportAllTemplates()}>
+                        Export All
+                      </Button>
+                    </Box>
+                  </Box>
+
+                  {loadingTemplates ? (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                      <CircularProgress />
+                    </Box>
+                  ) : (
+                    <List>
+                      {templates.map((template) => (
+                        <ListItem key={template._id} sx={{ border: 1, borderColor: 'divider', borderRadius: 1, mb: 1 }}>
+                          <ListItemText
+                            primary={template.name}
+                            secondary={template.description}
+                          />
+                          <ListItemSecondaryAction>
+                            <IconButton size="small" onClick={() => exportTemplate(template._id)}>
+                              📤
+                            </IconButton>
+                          </ListItemSecondaryAction>
+                        </ListItem>
+                      ))}
+                    </List>
+                  )}
+                </Stack>
+              </TabPanel>
+
+              <TabPanel value={activeTab} index={3}>
+                {/* Reports */}
+                <Stack spacing={3}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="h6">Generated Reports</Typography>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Button 
+                        size="small" 
+                        variant={reportViewMode === 'generated' ? 'contained' : 'outlined'}
+                        onClick={() => setReportViewMode('generated')}
+                      >
+                        Generated
+                      </Button>
+                      <Button 
+                        size="small"
+                        variant={reportViewMode === 'exported' ? 'contained' : 'outlined'}
+                        onClick={() => setReportViewMode('exported')}
+                      >
+                        Exported
+                      </Button>
+                      <Button 
+                        size="small"
+                        variant={reportViewMode === 'favorites' ? 'contained' : 'outlined'}
+                        onClick={() => setReportViewMode('favorites')}
+                      >
+                        Favorites
+                      </Button>
+                    </Box>
+                  </Box>
+
+                  {loadingReports || loadingExportedReports ? (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                      <CircularProgress />
+                    </Box>
+                  ) : (
+                    <List>
+                      {(reportViewMode === 'generated' ? userReports : exportedReports).map((report) => (
+                        <ListItem key={report._id} sx={{ border: 1, borderColor: 'divider', borderRadius: 1, mb: 1 }}>
+                          <ListItemText
+                            primary={report.metadata?.title || report.templateName || 'Untitled Report'}
+                            secondary={new Date(report.createdAt).toLocaleString()}
+                          />
+                          <ListItemSecondaryAction>
+                            <IconButton size="small" onClick={() => viewReport(report._id)}>
+                              👁️
+                            </IconButton>
+                            {reportViewMode === 'generated' && (
+                              <IconButton size="small" onClick={() => exportGeneratedReport(report._id)}>
+                                📤
+                              </IconButton>
+                            )}
+                            {reportViewMode === 'exported' && (
+                              <IconButton size="small" onClick={() => deleteExportedReport(report._id)}>
+                                🗑️
+                              </IconButton>
+                            )}
+                          </ListItemSecondaryAction>
+                        </ListItem>
+                      ))}
+                    </List>
+                  )}
+                </Stack>
+              </TabPanel>
+
+              <TabPanel value={activeTab} index={4}>
+                {/* Metrics */}
+                <Stack spacing={3}>
+                  <Typography variant="h6">Usage Metrics</Typography>
+                  
+                  {loadingMetrics ? (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                      <CircularProgress />
+                    </Box>
+                  ) : usageMetrics ? (
+                    <Grid container spacing={2}>
+                      <Grid item xs={6}>
+                        <Paper sx={{ p: 2 }}>
+                          <Typography variant="body2" color="text.secondary">Total Sessions</Typography>
+                          <Typography variant="h4">{usageMetrics.totalSessions || 0}</Typography>
+                        </Paper>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <Paper sx={{ p: 2 }}>
+                          <Typography variant="body2" color="text.secondary">Total Requests</Typography>
+                          <Typography variant="h4">{usageMetrics.totalRequests || 0}</Typography>
+                        </Paper>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <Paper sx={{ p: 2 }}>
+                          <Typography variant="body2" color="text.secondary">Avg Requests/Session</Typography>
+                          <Typography variant="h4">{usageMetrics.averageRequestsPerSession?.toFixed(1) || 0}</Typography>
+                        </Paper>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <Paper sx={{ p: 2 }}>
+                          <Typography variant="body2" color="text.secondary">Current Provider</Typography>
+                          <Typography variant="h6">{usageMetrics.currentProvider || 'None'}</Typography>
+                        </Paper>
+                      </Grid>
+                    </Grid>
+                  ) : (
+                    <Typography color="text.secondary">No metrics available</Typography>
+                  )}
+
+                  <Box sx={{ mt: 3 }}>
+                    <Button variant="outlined" onClick={() => exportUsageData()}>
+                      Export Usage Data
+                    </Button>
+                  </Box>
+                </Stack>
+              </TabPanel>
+
+              <TabPanel value={activeTab} index={5}>
+                {/* Advanced Settings */}
+                <Stack spacing={3}>
+                  <Typography variant="h6">Advanced Settings</Typography>
+                  
+                  <Box>
+                    <Typography variant="body2" sx={{ mb: 1 }}>MongoDB Connection String</Typography>
+                    <TextField
+                      fullWidth
+                      size="small"
+                      value={settings?.mongodb?.uri || ''}
+                      onChange={(e) => handleSettingsUpdate({
+                        ...settings,
+                        mongodb: { ...(settings?.mongodb || {}), uri: e.target.value }
+                      })}
+                      placeholder="mongodb://localhost:27017/auracle"
+                    />
+                  </Box>
+
+                  <Box>
+                    <Typography variant="body2" sx={{ mb: 1 }}>Processing Buffer Size (ms)</Typography>
+                    <TextField
+                      fullWidth
+                      size="small"
+                      type="number"
+                      value={settings?.processing?.bufferSize || 5000}
+                      onChange={(e) => handleSettingsUpdate({
+                        ...settings,
+                        processing: { ...(settings?.processing || {}), bufferSize: parseInt(e.target.value) }
+                      })}
+                    />
+                  </Box>
+
+                  <Box>
+                    <Typography variant="body2" sx={{ mb: 1 }}>Max Transcript Length</Typography>
+                    <TextField
+                      fullWidth
+                      size="small"
+                      type="number"
+                      value={settings?.limits?.transcriptLength || 10000}
+                      onChange={(e) => handleSettingsUpdate({
+                        ...settings,
+                        limits: { ...(settings?.limits || {}), transcriptLength: parseInt(e.target.value) }
+                      })}
+                    />
+                  </Box>
+                </Stack>
+              </TabPanel>
             </DialogContent>
             <DialogActions>
               <Button onClick={() => setShowSettings(false)}>

@@ -1674,7 +1674,27 @@ function App() {
                 ) : (
                   <Stack spacing={2}>
                     {research.slice(-3).map((item, index) => (
-                      <EnhancedResearchCard key={index} research={item} />
+                      <Box 
+                        key={index}
+                        sx={{ 
+                          p: 2, 
+                          bgcolor: 'rgba(6, 182, 212, 0.05)', 
+                          borderRadius: 2,
+                          border: '1px solid rgba(6, 182, 212, 0.1)',
+                        }}
+                      >
+                        <Typography variant="body2" sx={{ 
+                          fontWeight: 600, 
+                          mb: 1, 
+                          color: 'secondary.light',
+                          fontSize: '14px'
+                        }}>
+                          🔍 {item.topic || 'Research'}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ fontSize: '12px' }}>
+                          {item.summary || (item.sources && item.sources[0]?.summary) || 'Research insight available'}
+                        </Typography>
+                      </Box>
                     ))}
                   </Stack>
                 )}
